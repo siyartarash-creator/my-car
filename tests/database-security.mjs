@@ -1,3 +1,4 @@
+import { testWriteIntegration } from "./write-integration.mjs";
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -159,6 +160,7 @@ await as(other,async()=>{
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);
+await testWriteIntegration(db,buyer,seller,other);
 await db.close();
 }
 run(false).then(()=>run(true)).catch(e=>{console.error(e.message);process.exitCode=1});

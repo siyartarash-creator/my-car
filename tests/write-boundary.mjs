@@ -1,19 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import assert from 'node:assert/strict';
-import ts from 'typescript';
-import { fileURLToPath } from 'node:url';
-import { NextRequest, NextResponse } from 'next/server.js';
-const root=fileURLToPath(new URL('../',import.meta.url));
-function load(file,imports={}){
- const code=ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const m={exports:{}};
- new Function('module','exports','require',code)(m,m.exports,name=>{
-  if(!(name in imports))throw new Error('Unexpected test dependency: '+name);
-  return imports[name];
- });
- return m.exports;
-}
+import assert from "node:assert/strict";
+import { NextRequest, NextResponse } from "next/server.js";
+import { load } from "./helpers/load-typescript.mjs";
 const validation=load('lib/write-validation.ts');
 let user={id:'test-user'},rpcError=null,lastCall=null,calls=0;
 const {POST}=load('app/api/write/[action]/route.ts',{

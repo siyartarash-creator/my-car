@@ -52,4 +52,3 @@ export async function refreshSession(request: NextRequest) {
   if (user) response.headers.set("Cache-Control", "private, no-store");
   return response;
 }
-

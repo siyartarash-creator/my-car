@@ -54,3 +54,13 @@ Before hosted rollout, in a staging copy:
 Live migrations change permissions and order behavior. They require the project owner's explicit rollout approval and operator access. Nothing in the implementation/test commands connects to or modifies the hosted database.
 
 Rollback: retain a pre-deployment database backup and the old application revision, but do not blindly restore the old permissive policies. Stop writes, assess orders created since rollout, and use a forward repair or a coordinated database restore. Reverting only the application would re-enable a client path the database intentionally denies.
+
+## Local checkpoint validation (2026-09-29)
+
+- Resumed from the existing Phase 1 implementation on `phase-1-security-foundation`; original comparison base is `5387f75`. Foundation checkpoint: `8b5cc8e`.
+- Offline security suite: 84 database assertions and 15 HTTP-to-database assertions for each of empty/existing schemas, plus 31 HTTP/session boundary assertions (229 total). The integration suite executes the real route and SQL functions; Auth and Supabase transport remain test substitutes.
+- TypeScript and production build passed. Build used loopback Supabase URL and a non-secret placeholder key; this local build output must not be deployed.
+- Full lint identified 24 inherited errors and 3 warnings against the original baseline. The new test helper's lint error was corrected; targeted tests/session lint passes. Full-project lint is not green.
+- Diff reviewed for scope and artifacts: no environment files, credentials, build output, temporary scripts or dependency directories are tracked. The observed schema inventory is deliberate provenance; equivalent ACL records are grouped losslessly (930 KB reduced to 157 KB). The separate old-schema SQL fixture is intentional upgrade-test input, not an accidental duplicate migration. Lockfile changes support the pinned offline test dependency.
+- No hosted connection or production mutation was performed by this work. Remote state cannot be independently attested without accessing it.
+- Phase 1 is not yet closed: real staging Auth/Storage/browser workflows, independent PostgreSQL-session concurrency tests, and hosted configuration/drift checks remain rollout gates. The inherited lint debt is recorded rather than silently treated as a passing check. No Phase 2 work has started.
