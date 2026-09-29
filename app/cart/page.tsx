@@ -48,7 +48,7 @@ export default function CartPage() {
             <div className="space-y-4 lg:col-span-2">
               {items.map((item) => (
                 <div
-                  key={`${item.product_id}-${item.seller_name}`}
+                  key={`${item.offer_id}`}
                   className="flex gap-4 rounded-2xl border border-[#39FF14]/20 bg-neutral-900/60 p-4"
                 >
                   <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#39FF14]/20 bg-neutral-950 text-4xl">
@@ -80,9 +80,7 @@ export default function CartPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            updateQuantity(
-                              item.product_id,
-                              item.seller_name,
+                            updateQuantity(item.offer_id,
                               item.quantity + 1
                             )
                           }
@@ -96,9 +94,7 @@ export default function CartPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            updateQuantity(
-                              item.product_id,
-                              item.seller_name,
+                            updateQuantity(item.offer_id,
                               item.quantity - 1
                             )
                           }
@@ -114,7 +110,7 @@ export default function CartPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeItem(item.product_id, item.seller_name)}
+                    onClick={() => removeItem(item.offer_id)}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-red-400 transition hover:bg-red-500/10"
                     title="حذف"
                   >

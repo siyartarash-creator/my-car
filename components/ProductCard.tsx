@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCart } from "@/lib/cart-context";
 
 export type Product = {
+  offer_id?: number; seller_id?: string; seller_name?: string;
   id: number;
   name: string;
   slug: string;
@@ -43,11 +44,14 @@ export function ProductCard({ product }: ProductCardProps) {
   const isOutOfStock = stock === 0;
 
   const handleAddToCart = () => {
+    if (!product.offer_id || !product.seller_id) return;
     addItem({
+      offer_id: product.offer_id,
+      seller_id: product.seller_id,
       product_id: id,
       slug,
       name,
-      seller_name: "فروشگاه ماشین من",
+      seller_name: product.seller_name || "فروشنده",
       price: displayPrice,
       image: imageSrc ?? "",
       stock,
@@ -146,11 +150,12 @@ export type ProductBuyPanelProps = {
     stock: number;
     images: string[];
   };
-  seller_id?: string;
+  offer_id: number;
+  seller_id: string;
   seller_name?: string;
 };
 
-export function ProductBuyPanel({ product, seller_id, seller_name }: ProductBuyPanelProps) {
+export function ProductBuyPanel({ product, offer_id, seller_id, seller_name }: ProductBuyPanelProps) {
   const { id, name, slug, price, discount_price, stock, images } = product;
   const { addItem } = useCart();
 
@@ -172,6 +177,7 @@ export function ProductBuyPanel({ product, seller_id, seller_name }: ProductBuyP
   const handleAddToCart = () => {
     for (let i = 0; i < quantity; i++) {
       addItem({
+        offer_id,
         product_id: id,
         slug,
         name,

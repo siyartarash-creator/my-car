@@ -1,30 +1,25 @@
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-server";
 import ProductCard from "@/components/ProductCard";
 import { Logo } from "@/components/Logo";
 import { CartIcon } from "@/components/CartIcon";
 import type { Product } from "@/components/ProductCard";
 
-function toProduct(row: Product): Product {
-  return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    brand: row.brand,
-    price: row.price,
-    discount_price: row.discount_price ?? null,
-    images: Array.isArray(row.images) ? row.images : [],
-    stock: row.stock ?? 0,
-  };
-}
-
 export default async function ShopPage() {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id, name, slug, brand, price, discount_price, images, stock")
+    .select("id,name,slug,brand,images,product_sellers(id,seller_id,seller_name,price,discount_price,stock,is_active,is_hidden_by_seller)")
     .eq("is_active", true);
 
-  const products = (data ?? []).map((row) => toProduct(row as Product));
+  const products: Product[] = (data ?? []).map(row => {
+    const offers = row.product_sellers.filter(o => o.is_active === true && o.is_hidden_by_seller === false && o.stock > 0 && o.price > 0)
+      .sort((a,b) => (a.discount_price ?? a.price) - (b.discount_price ?? b.price));
+    const offer = offers[0];
+    return { id:row.id,name:row.name,slug:row.slug,brand:row.brand??"",images:row.images??[],
+      offer_id:offer?.id,seller_id:offer?.seller_id,seller_name:offer?.seller_name,
+      price:offer?.price??0,discount_price:offer?.discount_price??null,stock:offer?.stock??0 };
+  });
   const countLabel = products.length.toLocaleString("fa-IR");
 
   return (

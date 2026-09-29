@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -20,7 +21,7 @@ export function AvatarPicker() {
 
   useEffect(() => {
     const loadAvatar = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setLoading(false);
         return;
@@ -46,7 +47,7 @@ export function AvatarPicker() {
   }, []);
 
   const saveAvatar = async (type: string, value: string) => {
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) return;
     await supabase
       .from("profiles")
@@ -78,7 +79,7 @@ export function AvatarPicker() {
       return;
     }
 
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) {
       setUploadError("لطفاً ابتدا وارد شوید");
       return;
@@ -96,7 +97,7 @@ export function AvatarPicker() {
     try {
       const ext = file.name.split(".").pop() || "jpg";
       const fileName = `${userId}-${Date.now()}.${ext}`;
-      const filePath = `users/${fileName}`;
+      const filePath = `${userId}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from("avatars")
@@ -132,7 +133,7 @@ export function AvatarPicker() {
   };
 
   const handleRemoveUpload = async () => {
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) return;
 
     setUploadedImage(null);

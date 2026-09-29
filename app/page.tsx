@@ -1,4 +1,6 @@
 "use client";
+import { useIdentity } from "@/lib/auth-client";
+import { supabase } from "@/lib/supabase";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -97,8 +99,9 @@ export default function Home() {
   const [lang, setLang] = useState<"fa" | "en">("fa");
   const [langOpen, setLangOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userName, setUserName] = useState("");
+  const { user, profile } = useIdentity();
+  const isLoggedIn = !!user;
+  const userName = profile?.name.trim().split(" ")[0] ?? "";
   const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
@@ -111,10 +114,6 @@ export default function Home() {
     });
     setDate(faDate);
 
-    const logged = localStorage.getItem("isLoggedIn") === "true";
-    const name = localStorage.getItem("userName") || "";
-    setIsLoggedIn(logged);
-    setUserName(name.trim().split(" ")[0]);
   }, []);
 
   const handleFeatureClick = (e: React.MouseEvent) => {
@@ -124,12 +123,9 @@ export default function Home() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("userName");
-    localStorage.removeItem("userType");
-    setIsLoggedIn(false);
-    setUserName("");
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) { alert("خروج انجام نشد؛ دوباره تلاش کنید"); return; }
     setAuthOpen(false);
   };
 

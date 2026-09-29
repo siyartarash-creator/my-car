@@ -1,7 +1,8 @@
 "use client";
+import { getCurrentUserId, useIdentity } from "@/lib/auth-client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { AvatarPicker } from "@/components/AvatarPicker";
@@ -640,9 +641,9 @@ function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData,
 }
 
 function ProfileContent() {
-  const searchParams = useSearchParams();
+  const { profile: identityProfile } = useIdentity();
   const router = useRouter();
-  const type = searchParams.get("type") || "owner";
+  const type = identityProfile?.user_type ?? "owner";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -664,7 +665,7 @@ function ProfileContent() {
 
   useEffect(() => {
     const loadProfile = async () => {
-      const storedId = localStorage.getItem("userId");
+      const storedId = await getCurrentUserId();
       if (!storedId) {
         router.push("/login");
         return;

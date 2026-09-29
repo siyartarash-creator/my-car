@@ -13,7 +13,7 @@ const userTypes = [
   { id: "rescuer", title: "امداد رسان‌ها", desc: "امدادگر سیار که در جاده‌ها و شهر به خودروها کمک می‌کنه", icon: "🚨" },
 ];
 
-const OTP_FAKE = "1234";
+
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -27,9 +27,6 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [otp, setOtp] = useState("");
-  const [otpError, setOtpError] = useState("");
-  const [resendTimer, setResendTimer] = useState(0);
   const [nameError, setNameError] = useState("");
   const [loading, setLoading] = useState(false);
   const [registerError, setRegisterError] = useState("");
@@ -45,7 +42,7 @@ export default function RegisterPage() {
     }
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
 
@@ -55,29 +52,13 @@ export default function RegisterPage() {
     if (password.length < 6) { alert("رمز عبور باید حداقل ۶ کاراکتر باشد"); return; }
     if (password !== confirmPassword) { alert("رمز عبور و تکرار آن یکسان نیستند"); return; }
 
-    setStep(3);
-    setResendTimer(60);
-    const interval = setInterval(() => {
-      setResendTimer((t) => {
-        if (t <= 1) { clearInterval(interval); return 0; }
-        return t - 1;
-      });
-    }, 1000);
-  };
-
-  const handleOtpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otp !== OTP_FAKE) {
-      setOtpError("کد وارد شده اشتباه است. کد درست: 1234");
-      return;
-    }
-    setOtpError("");
+    if (loading) return;
     setLoading(true);
     setRegisterError("");
 
     try {
       const email = `${mobile}@mycar.local`;
-      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim(), mobile, user_type: selectedType || "owner" } } });
 
       if (authError) {
         if (authError.message.includes("already registered")) {
@@ -95,30 +76,12 @@ export default function RegisterPage() {
         return;
       }
 
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: authData.user.id,
-        user_type: selectedType,
-        name: name.trim(),
-        mobile,
-        avatar_type: "preset",
-        avatar_value: "🚗",
-      });
 
-      if (profileError) {
-        setRegisterError(`خطا در ذخیره پروفایل: ${profileError.message}`);
-        setLoading(false);
-        return;
-      }
 
-      if (typeof window !== "undefined") {
-        localStorage.setItem("isLoggedIn", "true");
-        localStorage.setItem("userName", name.trim());
-        localStorage.setItem("userType", selectedType || "owner");
-        localStorage.setItem("userId", authData.user.id);
-      }
 
       setLoading(false);
-      setStep(4);
+      if (!authData.session) { setRegisterError("حساب ساخته شد؛ ورود نیازمند تأیید تنظیمات احراز هویت است"); return; }
+      setStep(3);
     } catch (err) {
       setRegisterError(`خطای غیرمنتظره: ${err instanceof Error ? err.message : "نامشخص"}`);
       setLoading(false);
@@ -138,12 +101,12 @@ export default function RegisterPage() {
 
       <section className="mx-auto max-w-4xl px-6 py-16">
         <div className="mb-10 flex items-center justify-center gap-2 text-xs">
-          {[1, 2, 3, 4].map((n) => (
+          {[1, 2, 3].map((n) => (
             <div key={n} className="flex items-center gap-2">
               <div className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold transition ${step >= n ? "border-[#39FF14] bg-[#39FF14] text-black" : "border-[#39FF14]/20 text-gray-500"}`}>
                 {n}
               </div>
-              {n < 4 && <div className={`h-0.5 w-8 transition ${step > n ? "bg-[#39FF14]" : "bg-[#39FF14]/20"}`} />}
+              {n < 3 && <div className={`h-0.5 w-8 transition ${step > n ? "bg-[#39FF14]" : "bg-[#39FF14]/20"}`} />}
             </div>
           ))}
         </div>
@@ -196,6 +159,8 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            <p className="mb-3 text-sm text-gray-400">ثبت‌نام با رمز عبور انجام می‌شود؛ شماره موبایل در این مرحله تأیید پیامکی نمی‌شود.</p>
+            {registerError && <p className="text-red-400">{registerError}</p>}
             <form onSubmit={handleRegisterSubmit} className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm text-gray-300">نام و نام خانوادگی</label>
@@ -319,78 +284,16 @@ export default function RegisterPage() {
 
               <button
                 type="submit"
+                  disabled={loading}
                 className="w-full rounded-lg bg-[#39FF14] px-8 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/80 hover:shadow-[0_0_30px_rgba(57,255,20,0.8)]"
               >
-                دریافت کد تایید
+                {loading ? "در حال ثبت‌نام..." : "ساخت حساب"}
               </button>
             </form>
           </>
         )}
 
         {step === 3 && (
-          <>
-            <button
-              onClick={() => setStep(2)}
-              className="group mb-8 flex items-center gap-3 rounded-full border border-[#39FF14]/30 bg-neutral-900/50 px-5 py-3 text-sm font-bold text-[#39FF14] transition hover:border-[#39FF14] hover:bg-[#39FF14]/10"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:-translate-x-1">
-                <path d="M19 12H5M12 19l-7-7 7-7" />
-              </svg>
-              <span>برگرد به مرحله قبل</span>
-            </button>
-
-            <div className="mx-auto max-w-md text-center">
-              <div className="mb-4 text-6xl">📱</div>
-              <h2 className="mb-2 text-2xl font-bold md:text-3xl">کد تایید را وارد کن</h2>
-              <p className="mb-2 text-gray-400">
-                کد ۴ رقمی به شماره <span className="text-[#39FF14]" dir="ltr">{mobile}</span> پیامک شد
-              </p>
-              <p className="mb-8 rounded-lg border border-[#39FF14]/20 bg-neutral-900/50 px-4 py-2 text-sm text-[#39FF14]">
-                🧪 حالت تست: کد درست <strong>1234</strong> است
-              </p>
-
-              <form onSubmit={handleOtpSubmit} className="space-y-4">
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                  placeholder="- - - -"
-                  maxLength={4}
-                  dir="ltr"
-                  disabled={loading}
-                  className="w-full rounded-lg border border-[#39FF14]/20 bg-neutral-900 px-4 py-4 text-center text-3xl tracking-[1em] text-white outline-none transition placeholder:text-gray-600 focus:border-[#39FF14] focus:shadow-[0_0_15px_rgba(57,255,20,0.3)] disabled:opacity-50"
-                />
-
-                {otpError && <p className="text-sm text-red-400">{otpError}</p>}
-
-                {registerError && (
-                  <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-                    ❌ {registerError}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-lg bg-[#39FF14] px-8 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/80 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? "در حال ثبت‌نام..." : "تایید و ادامه"}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={resendTimer > 0 || loading}
-                  onClick={() => setResendTimer(60)}
-                  className="w-full text-sm text-gray-400 transition hover:text-[#39FF14] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {resendTimer > 0 ? `ارسال مجدد کد تا ${resendTimer} ثانیه` : "ارسال مجدد کد"}
-                </button>
-              </form>
-            </div>
-          </>
-        )}
-
-        {step === 4 && (
           <div className="mx-auto max-w-md text-center">
             <div className="mb-6 text-7xl">🎉</div>
             <h2 className="mb-3 text-3xl font-bold">

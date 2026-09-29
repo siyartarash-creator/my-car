@@ -1,7 +1,8 @@
 "use client";
+import { secureWrite } from "@/lib/secure-write";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type OrderItem = {
@@ -72,7 +73,7 @@ export default function SellerOrdersPage() {
   const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
 
   const loadOrders = async () => {
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) {
       setLoading(false);
       return;
@@ -84,7 +85,7 @@ export default function SellerOrdersPage() {
         `
         id, order_id, product_id, product_name, product_price, 
         quantity, seller_id,
-        orders (id, status, created_at, shipping_address)
+        orders:seller_fulfillments!inner(id:order_id, status, created_at, shipping_address)
       `
       )
       .eq("seller_id", userId)
@@ -113,13 +114,7 @@ export default function SellerOrdersPage() {
 
     setUpdatingOrderId(orderId);
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId);
+    const { error: updateError } = await secureWrite("fulfillment", { order_id: orderId, status: newStatus });
 
     if (updateError) {
       alert(`خطا در تغییر وضعیت: ${updateError.message}`);
@@ -156,7 +151,7 @@ export default function SellerOrdersPage() {
   };
 
   // ساخت آدرس کامل از فیلدها
-  const buildAddress = (addr: any) => {
+  const buildAddress = (addr: NonNullable<OrderItem["orders"]>["shipping_address"]) => {
     if (!addr) return "—";
     const parts = [
       addr.province,
@@ -294,12 +289,11 @@ export default function SellerOrdersPage() {
               >
                 {/* سر */}
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <Link
-                    href={`/orders/${order.id}`}
+                  <span
                     className="text-sm font-bold text-[#39FF14] transition hover:underline"
                   >
                     سفارش #{order.id.toLocaleString("fa-IR")}
-                  </Link>
+                  </span>
                   <span
                     className={`rounded-full border px-3 py-1 text-xs font-bold ${config.color}`}
                   >
@@ -397,15 +391,6 @@ export default function SellerOrdersPage() {
                         ✅ تحویل داده شد
                       </button>
                     )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(order.id, "cancelled")}
-                      disabled={isUpdating}
-                      className="rounded-lg border border-red-500/40 px-4 py-2 text-xs font-bold text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
-                    >
-                      ❌ لغو
-                    </button>
                   </div>
                 )}
 

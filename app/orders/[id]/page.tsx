@@ -1,4 +1,5 @@
 "use client";
+import { secureWrite } from "@/lib/secure-write";
 
 import { useEffect, useState } from "react";
 import { useParams, notFound } from "next/navigation";
@@ -102,10 +103,7 @@ export default function OrderPage() {
     if (!confirm("مطمئنی می‌خوای این سفارش رو لغو کنی؟")) return;
 
     setCancelling(true);
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ status: "cancelled", updated_at: new Date().toISOString() })
-      .eq("id", order.id);
+    const { error: updateError } = await secureWrite("cancel", { order_id: order.id });
 
     if (updateError) {
       alert(`خطا: ${updateError.message}`);

@@ -67,12 +67,6 @@ export default function LoginPage() {
         return;
       }
 
-      if (typeof window !== "undefined") {
-        localStorage.setItem("isLoggedIn", "true");
-        localStorage.setItem("userName", profileData.name);
-        localStorage.setItem("userType", profileData.user_type);
-        localStorage.setItem("userId", authData.user.id);
-      }
 
       setLoading(false);
       router.push("/dashboard");

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { requireRole } from "@/lib/auth-server";
 
 export default async function AdminProductsPage() {
+  const { client: supabase } = await requireRole("admin");
   const { data, error } = await supabase
     .from("products")
     .select("id, name, slug, brand, price, discount_price, stock, is_active, is_featured, images")

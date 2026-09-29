@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -43,7 +44,7 @@ export default function SellerRequestsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setLoading(false);
         return;

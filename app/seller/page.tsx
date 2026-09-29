@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -16,7 +17,7 @@ export default function SellerDashboard() {
 
   useEffect(() => {
     const load = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setLoading(false);
         return;
@@ -35,10 +36,10 @@ export default function SellerDashboard() {
             .select("id", { count: "exact", head: true })
             .eq("seller_id", userId),
           supabase
-            .from("order_items")
-            .select("order_id, orders!inner(status)")
+            .from("seller_fulfillments")
+            .select("order_id,status")
             .eq("seller_id", userId)
-            .eq("orders.status", "pending"),
+            .eq("status", "pending"),
         ]);
 
       const myPrices = myPricesRes.data || [];
@@ -47,7 +48,7 @@ export default function SellerDashboard() {
       let pendingOrders = 0;
       if (pendingRes.data) {
         const uniqueOrders = new Set(
-          pendingRes.data.map((i: any) => i.order_id)
+          pendingRes.data.map((i) => i.order_id)
         );
         pendingOrders = uniqueOrders.size;
       }

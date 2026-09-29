@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -11,7 +12,7 @@ export function SellerCard() {
 
   useEffect(() => {
     const check = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setLoading(false);
         return;
@@ -27,13 +28,13 @@ export function SellerCard() {
 
         // گرفتن سفارشات در انتظار این فروشنده
         const { data: orderItems } = await supabase
-          .from("order_items")
-          .select("order_id, orders!inner(status)")
+          .from("seller_fulfillments")
+          .select("order_id,status")
           .eq("seller_id", userId)
-          .eq("orders.status", "pending");
+          .eq("status", "pending");
 
         if (orderItems) {
-          const uniqueOrders = new Set(orderItems.map((i: any) => i.order_id));
+          const uniqueOrders = new Set(orderItems.map((i) => i.order_id));
           setPendingOrders(uniqueOrders.size);
         }
       }

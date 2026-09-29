@@ -1,4 +1,6 @@
 "use client";
+import { useIdentity } from "@/lib/auth-client";
+import { supabase } from "@/lib/supabase";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -86,29 +88,18 @@ const dashboardItems = [
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [userName, setUserName] = useState("");
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { user, profile, loading: authLoading } = useIdentity();
+  const userName = profile?.name.trim().split(" ")[0] ?? "";
+  const isLoggedIn = !!user;
   const [authOpen, setAuthOpen] = useState(false);
 
   useEffect(() => {
-    const logged = localStorage.getItem("isLoggedIn") === "true";
-    const name = localStorage.getItem("userName") || "";
-    const firstName = name.trim().split(" ")[0] || "";
+    if (!authLoading && !user) router.replace("/login");
+  }, [authLoading, user, router]);
 
-    if (!logged) {
-      router.push("/");
-      return;
-    }
-
-    setIsLoggedIn(true);
-    setUserName(firstName);
-  }, [router]);
-
-  const handleLogout = () => {
-    localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("userName");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("userType");
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) { alert("خروج انجام نشد؛ دوباره تلاش کنید"); return; }
     router.push("/");
   };
 

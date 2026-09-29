@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -15,7 +16,7 @@ export function UserAvatar({ size = 48, className = "" }: UserAvatarProps) {
 
   useEffect(() => {
     const load = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setLoading(false);
         return;

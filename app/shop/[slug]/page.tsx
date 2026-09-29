@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-server";
 import { Logo } from "@/components/Logo";
 import { CartIcon } from "@/components/CartIcon";
 import { ProductBuyPanel } from "@/components/ProductCard";
@@ -33,6 +33,7 @@ type SellerRow = {
 };
 
 async function getProduct(slug: string): Promise<ProductRow | null> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
     .select(
@@ -47,6 +48,7 @@ async function getProduct(slug: string): Promise<ProductRow | null> {
 }
 
 async function getSellers(productId: number): Promise<SellerRow[]> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("product_sellers")
     .select(
@@ -83,7 +85,6 @@ export default async function ProductPage({
     (product.images ?? []).find((s) => s && s.trim().length > 0) ?? null;
 
   const cheapestPrice = sellers.length > 0 ? sellers[0].price : null;
-  const hasAnyStock = sellers.some((s) => s.stock > 0);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-white" dir="rtl">
@@ -315,7 +316,8 @@ export default async function ProductPage({
                           stock: seller.stock,
                           images: product.images ?? [],
                         }}
-                        seller_id={seller.seller_id}
+                        offer_id={seller.id}
+                          seller_id={seller.seller_id}
                         seller_name={seller.seller_name}
                       />
                     </div>

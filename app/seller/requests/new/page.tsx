@@ -1,4 +1,5 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -44,7 +45,7 @@ export default function NewRequestPage() {
     e.preventDefault();
     setError("");
 
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) {
       setError("لطفاً وارد شوید");
       return;
@@ -65,7 +66,7 @@ export default function NewRequestPage() {
     try {
       // ۱. آپلود عکس به Supabase Storage
       const ext = photoFile.name.split(".").pop() || "jpg";
-      const fileName = `requests/${userId}-${Date.now()}.${ext}`;
+      const fileName = `${userId}/requests/${userId}-${Date.now()}.${ext}`;
 
       const { error: uploadError } = await supabase.storage
         .from("avatars")
@@ -91,12 +92,11 @@ export default function NewRequestPage() {
         .from("product_requests")
         .insert({
           seller_id: userId,
-          seller_name: localStorage.getItem("userName") || null,
-          seller_mobile: localStorage.getItem("userMobile") || null,
+          seller_name: null,
+          seller_mobile: null,
           product_name: productName.trim(),
           brand: brand.trim() || null,
           photo_url: photoUrl,
-          status: "pending",
         });
 
       if (insertError) {

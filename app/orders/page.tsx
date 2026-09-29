@@ -1,4 +1,6 @@
 "use client";
+import { secureWrite } from "@/lib/secure-write";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -28,7 +30,7 @@ export default function OrdersPage() {
   const [cancellingId, setCancellingId] = useState<number | null>(null);
 
   const loadOrders = async () => {
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) {
       setError("لطفاً وارد شوید");
       setLoading(false);
@@ -60,10 +62,7 @@ export default function OrdersPage() {
 
     setCancellingId(orderId);
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ status: "cancelled", updated_at: new Date().toISOString() })
-      .eq("id", orderId);
+    const { error: updateError } = await secureWrite("cancel", { order_id: orderId });
 
     if (updateError) {
       alert(`خطا در لغو سفارش: ${updateError.message}`);

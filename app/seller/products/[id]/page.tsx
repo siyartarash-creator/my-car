@@ -1,4 +1,6 @@
 "use client";
+import { secureWrite } from "@/lib/secure-write";
+import { getCurrentUserId } from "@/lib/auth-client";
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
@@ -54,7 +56,7 @@ export default function SellerProductPricePage() {
 
   useEffect(() => {
     const load = async () => {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         router.push("/login");
         return;
@@ -101,7 +103,7 @@ export default function SellerProductPricePage() {
     setError("");
     setSuccess("");
 
-    const userId = localStorage.getItem("userId");
+    const userId = await getCurrentUserId();
     if (!userId) {
       setError("لطفاً وارد شوید");
       return;
@@ -133,31 +135,11 @@ export default function SellerProductPricePage() {
 
     setSaving(true);
 
-    const priceData = {
-      product_id: Number(productId),
-      seller_id: userId,
-      seller_name: localStorage.getItem("userName") || "فروشنده",
-      price: Number(price),
-      discount_price: discountPrice ? Number(discountPrice) : null,
-      stock: stock ? Number(stock) : 0,
-      warranty: warranty.trim() || null,
-      shipping: shipping.trim() || null,
-      notes: notes.trim() || null,
-      is_active: isActive,
-      is_hidden_by_seller: isHidden,
-    };
-
-    let result;
-    if (existing) {
-      // آپدیت
-      result = await supabase
-        .from("product_sellers")
-        .update(priceData)
-        .eq("id", existing.id);
-    } else {
-      // درج جدید
-      result = await supabase.from("product_sellers").insert(priceData);
-    }
+    const result = await secureWrite("offer", {
+      product_id:Number(productId),offer_id:existing?.id??null,price:Number(price),
+      discount_price:discountPrice?Number(discountPrice):null,stock:Number(stock||0),
+      warranty:warranty.trim()||null,shipping:shipping.trim()||null,notes:notes.trim()||null,hidden:isHidden,
+    });
 
     if (result.error) {
       setError(`خطا در ذخیره: ${result.error.message}`);
@@ -174,13 +156,13 @@ export default function SellerProductPricePage() {
 
   const handleDelete = async () => {
     if (!existing) return;
-    if (!confirm("مطمئنی می‌خوای قیمت این محصول رو حذف کنی؟ بعد از حذف، محصول از سبد فروشنده حذف می‌شه.")) return;
+    if (!confirm("این پیشنهاد از فروشگاه پنهان شود؟ سابقه سفارش‌ها حفظ می‌شود.")) return;
 
     setDeleting(true);
-    const { error: deleteError } = await supabase
-      .from("product_sellers")
-      .delete()
-      .eq("id", existing.id);
+    const { error: deleteError } = await secureWrite("offer", {
+      product_id:Number(productId),offer_id:existing.id,price:existing.price,discount_price:existing.discount_price,
+      stock:existing.stock,warranty:existing.warranty,shipping:existing.shipping,notes:existing.notes,hidden:true,
+    });
 
     if (deleteError) {
       setError(`خطا در حذف: ${deleteError.message}`);
@@ -398,7 +380,7 @@ export default function SellerProductPricePage() {
                 <input
                   type="checkbox"
                   checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
+                  disabled
                   className="h-5 w-5 accent-[#39FF14]"
                 />
                 <span>

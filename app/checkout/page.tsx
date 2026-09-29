@@ -1,6 +1,8 @@
 "use client";
+import { getCurrentUserId } from "@/lib/auth-client";
+import { secureWrite } from "@/lib/secure-write";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
@@ -23,7 +25,11 @@ type AppliedCoupon = {
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, totalPrice, clearCart } = useCart();
+  const { items, totalPrice, clearCart, loaded } = useCart();
+  const restored = useRef(false);
+  const completedOrder = useRef(false);
+  const attempt = useRef<{ payload: string; key: string } | null>(null);
+  const [quoted, setQuoted] = useState<{key:string;data:{subtotal:number;shipping:number;discount:number;total:number}} | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,137 +49,70 @@ export default function CheckoutPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
 
   useEffect(() => {
-    const userId = localStorage.getItem("userId");
-    if (!userId) {
-      router.push("/login");
-      return;
-    }
-
-    if (items.length === 0) {
-      router.push("/cart");
-      return;
-    }
-
-    const loadProfile = async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("name, mobile, address_data")
-        .eq("id", userId)
-        .single();
-
-      if (data) {
-        setFullName(data.name || "");
-        setMobile(data.mobile || "");
-
-        const savedAddress = data.address_data as AddressData | null;
-        if (
-          savedAddress &&
-          savedAddress.province &&
-          savedAddress.city &&
-          savedAddress.street
-        ) {
-          setAddressData(savedAddress);
-          setHasExistingAddress(true);
-          setUseExistingAddress(true);
-        }
+    if (!loaded || completedOrder.current) return;
+    let active = true;
+    const load = async () => {
+      const userId = await getCurrentUserId();
+      if (!userId) { router.replace("/login"); return; }
+      if (!items.length) { router.replace("/cart"); return; }
+      // A previous response may have been lost after the transaction committed.
+      if (!restored.current) {
+        restored.current = true;
+        try {
+          const storageKey = "mycar-checkout-attempt-" + userId;
+          const pending = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+          if (pending?.key) {
+            const { data: completed } = await supabase.from("orders").select("id").eq("user_id",userId).eq("checkout_key",pending.key).maybeSingle();
+            if (completed && active) {
+              completedOrder.current = true;
+              sessionStorage.removeItem(storageKey);
+              try {
+                const submittedItems = JSON.parse(pending.payload).items;
+                const currentItems = items.map(i => ({offer_id:i.offer_id,quantity:i.quantity})).sort((a,b)=>a.offer_id-b.offer_id);
+                if (JSON.stringify(submittedItems) === JSON.stringify(currentItems)) clearCart();
+              } catch { /* Do not clear a cart if its submitted snapshot cannot be verified. */ }
+              router.replace("/orders/" + completed.id);
+              return;
+            }
+          }
+        } catch { /* Recovery is optional; submitting still uses the idempotency key. */ }
+      }
+      const { data } = await supabase.from("profiles").select("name,mobile,address_data").eq("id",userId).single();
+      if (!active) return;
+      if (data) { setFullName(data.name ?? ""); setMobile(data.mobile ?? "");
+        if (data.address_data?.street) { setAddressData(data.address_data); setHasExistingAddress(true); setUseExistingAddress(true); }
       }
       setLoading(false);
     };
-    loadProfile();
-  }, [router, items.length]);
+    void load(); return () => { active = false; };
+  }, [loaded, router, items.length]);
+
+  const itemPayload = JSON.stringify(items.map(i => ({ offer_id:i.offer_id,quantity:i.quantity })).sort((a,b)=>a.offer_id-b.offer_id));
+  const quoteKey = itemPayload + ":" + (appliedCoupon?.code ?? "");
+  const quote = quoted?.key === quoteKey ? quoted.data : null;
+  useEffect(() => {
+    if (!loaded || !items.length) return;
+    let active = true;
+    void secureWrite("quote", {items:JSON.parse(itemPayload),coupon:appliedCoupon?.code??null}).then(result => {
+      if (!active) return;
+      if (result.error) setError(result.error.message);
+      else { setQuoted({key:quoteKey,data:result.data}); setError(""); }
+    });
+    return () => { active = false; };
+  }, [loaded, itemPayload, appliedCoupon?.code, items.length, quoteKey]);
 
   // محاسبه مبلغ نهایی
-  const couponDiscount = appliedCoupon?.discount_amount || 0;
-  const finalPrice = Math.max(0, totalPrice + SHIPPING_COST - couponDiscount);
+  const couponDiscount = quote?.discount ?? 0;
+  const finalPrice = quote?.total ?? 0;
 
   // اعمال کد تخفیف
   const handleApplyCoupon = async () => {
-    setCouponError("");
-    setAppliedCoupon(null);
-
-    const cleanCode = couponCode.trim().toUpperCase();
-    if (!cleanCode) {
-      setCouponError("کد تخفیف رو وارد کن");
-      return;
-    }
-
-    setCouponLoading(true);
-
-    const userId = localStorage.getItem("userId");
-    if (!userId) {
-      setCouponError("لطفاً وارد شوید");
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۱. پیدا کردن کد
-    const { data: coupon, error: couponQueryError } = await supabase
-      .from("coupons")
-      .select("*")
-      .eq("code", cleanCode)
-      .eq("is_active", true)
-      .single();
-
-    if (couponQueryError || !coupon) {
-      setCouponError("کد تخفیف معتبر نیست یا غیرفعال شده");
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۲. تاریخ انقضا
-    if (coupon.valid_until && new Date(coupon.valid_until) < new Date()) {
-      setCouponError("این کد تخفیف منقضی شده");
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۳. تعداد استفاده کل
-    if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
-      setCouponError("ظرفیت استفاده از این کد پر شده");
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۴. حداقل مبلغ
-    if (coupon.min_order_amount > 0 && totalPrice < coupon.min_order_amount) {
-      setCouponError(
-        `حداقل مبلغ سفارش برای این کد ${coupon.min_order_amount.toLocaleString(
-          "fa-IR"
-        )} تومان است`
-      );
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۵. تعداد استفاده کاربر
-    const { count: userUsageCount } = await supabase
-      .from("coupon_usages")
-      .select("id", { count: "exact", head: true })
-      .eq("coupon_id", coupon.id)
-      .eq("user_id", userId);
-
-    if (
-      coupon.max_uses_per_user &&
-      (userUsageCount || 0) >= coupon.max_uses_per_user
-    ) {
-      setCouponError("شما قبلاً از این کد استفاده کرده‌اید");
-      setCouponLoading(false);
-      return;
-    }
-
-    // ۶. محاسبه تخفیف
-    let discountAmount = 0;
-    if (coupon.discount_type === "percent") {
-      discountAmount = Math.floor((totalPrice * coupon.discount_value) / 100);
-    } else {
-      discountAmount = Math.min(coupon.discount_value, totalPrice);
-    }
-
-    setAppliedCoupon({
-      id: coupon.id,
-      code: coupon.code,
-      discount_amount: discountAmount,
-    });
+    setCouponLoading(true); setCouponError("");
+    const code=couponCode.trim().toUpperCase();
+    if (!code) { setCouponError("کد تخفیف را وارد کنید"); setCouponLoading(false); return; }
+    const result=await secureWrite("quote",{items:JSON.parse(itemPayload),coupon:code});
+    if(result.error) setCouponError(result.error.message);
+    else { setAppliedCoupon({id:0,code,discount_amount:result.data.discount}); setQuoted({key:quoteKey,data:result.data}); }
     setCouponLoading(false);
   };
 
@@ -211,7 +150,7 @@ export default function CheckoutPage() {
     setSaving(true);
 
     try {
-      const userId = localStorage.getItem("userId");
+      const userId = await getCurrentUserId();
       if (!userId) {
         setError("لطفاً وارد شوید");
         setSaving(false);
@@ -232,81 +171,28 @@ export default function CheckoutPage() {
         notes: notes.trim() || null,
       };
 
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert({
-          user_id: userId,
-          status: "pending",
-          total_price: totalPrice,
-          shipping_cost: SHIPPING_COST,
-          discount: couponDiscount,
-          final_price: finalPrice,
-          coupon_id: appliedCoupon?.id || null,
-          coupon_code: appliedCoupon?.code || null,
-          coupon_discount: couponDiscount,
-          shipping_address: shippingAddress,
-          payment_method: "cash_on_delivery",
-          payment_status: "pending",
-        })
-        .select("id")
-        .single();
-
-      if (orderError || !orderData) {
-        setError(`خطا در ساخت سفارش: ${orderError?.message || "نامشخص"}`);
-        setSaving(false);
-        return;
+      if (!quote) { setError("ابتدا منتظر بررسی قیمت و موجودی بمانید"); setSaving(false); return; }
+      const payload = { items:JSON.parse(itemPayload),address:shippingAddress,coupon:appliedCoupon?.code??null,expected_total:quote.total };
+      const fingerprint = JSON.stringify(payload);
+      const storageKey = "mycar-checkout-attempt-" + userId;
+      if (!attempt.current) {
+        try { attempt.current = JSON.parse(sessionStorage.getItem(storageKey) ?? "null"); } catch { /* Ignore corrupt draft. */ }
       }
-
-      const orderId = orderData.id;
-
-      const orderItems = items.map((item) => ({
-        order_id: orderId,
-        product_id: item.product_id,
-        product_name: item.name,
-        product_price: item.price,
-        quantity: item.quantity,
-        seller_id: item.seller_id || null,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("order_items")
-        .insert(orderItems);
-
-      if (itemsError) {
-        setError(`خطا در ثبت آیتم‌ها: ${itemsError.message}`);
-        setSaving(false);
-        return;
-      }
-
-      // اگه کد تخفیف اعمال شده، ثبت کن
-      if (appliedCoupon) {
-        await supabase.from("coupon_usages").insert({
-          coupon_id: appliedCoupon.id,
-          user_id: userId,
-          order_id: orderId,
-        });
-
-        // آپدیت used_count
-        const { data: currentCoupon } = await supabase
-          .from("coupons")
-          .select("used_count")
-          .eq("id", appliedCoupon.id)
-          .single();
-
-        if (currentCoupon) {
-          await supabase
-            .from("coupons")
-            .update({ used_count: (currentCoupon.used_count || 0) + 1 })
-            .eq("id", appliedCoupon.id);
+      if (!attempt.current || attempt.current.payload !== fingerprint) attempt.current = {payload:fingerprint,key:crypto.randomUUID()};
+      try { sessionStorage.setItem(storageKey,JSON.stringify(attempt.current)); } catch { /* Ref preserves retries within this page. */ }
+      const result = await secureWrite("checkout",{...payload,key:attempt.current.key});
+      if (result.error) {
+        setError(result.error.message);
+        if (result.error.code === "price_changed") {
+          const fresh = await secureWrite("quote", {items:JSON.parse(itemPayload),coupon:appliedCoupon?.code??null});
+          setQuoted(fresh.error ? null : {key:quoteKey,data:fresh.data});
+          setError("قیمت تغییر کرده است؛ مبلغ جدید را بررسی و دوباره تأیید کنید");
         }
+        setSaving(false); return;
       }
-
-      // ذخیره آدرس توی پروفایل
-      await supabase
-        .from("profiles")
-        .update({ address_data: addressData })
-        .eq("id", userId);
-
+      const orderId=result.data.order_id;
+      try { sessionStorage.removeItem(storageKey); } catch { /* No persistence available. */ }
+      completedOrder.current = true;
       clearCart();
       router.push(`/orders/${orderId}`);
     } catch (err) {
@@ -578,7 +464,7 @@ export default function CheckoutPage() {
                     <div className="flex justify-between">
                       <span className="text-gray-400">جمع کالاها</span>
                       <span className="font-bold text-white">
-                        {formatToman(totalPrice)} تومان
+                        {formatToman(quote?.subtotal ?? totalPrice)} تومان
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -607,7 +493,7 @@ export default function CheckoutPage() {
 
                   <button
                     type="submit"
-                    disabled={saving}
+                    disabled={saving || !quote}
                     className="mt-6 w-full rounded-lg bg-[#39FF14] px-6 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? "در حال ثبت..." : "✅ ثبت سفارش"}
