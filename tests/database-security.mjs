@@ -35,7 +35,8 @@ const buyer='00000000-0000-0000-0000-000000000001',seller='00000000-0000-0000-00
 await db.exec(`insert into auth.users values ('${buyer}','{"name":"Buyer","mobile":"09100000001","user_type":"owner"}'),('${seller}','{"name":"Seller","mobile":"09100000002","user_type":"seller"}'),('${other}','{"name":"Other","mobile":"09100000003","user_type":"seller"}');
 insert into products(id,name,slug) values(1,'Part','part');
 insert into product_sellers(id,product_id,seller_id,seller_name,price,stock) values(1,1,'${seller}','Seller',100000,3),(2,1,'${other}','Other',200000,3);
-insert into coupons(code,discount_type,discount_value,max_uses) values('ONE','percent',10,1);`);
+insert into coupons(code,discount_type,discount_value,max_uses) values('ONE','percent',10,1);
+select setval('products_id_seq', (select coalesce(max(id),0) from products));`);
 let passed=0;
 async function as(uid,fn){await db.exec(`set role ${uid?'authenticated':'anon'}; select set_config('request.jwt.claim.sub','${uid??''}',false);`);try{return await fn();}finally{await db.exec('reset role');}}
 async function deny(sql){await assert.rejects(()=>db.exec(sql));passed++;}
@@ -219,7 +220,11 @@ await db.exec('update marketplace_settings set seller_autonomous_discount_max_pe
 await db.exec(`update profiles set is_admin=true where id='${other}'`);
 await as(other,async()=>{
  await check('select is_admin()',true);
- await db.exec("insert into products(name,slug) values('Admin Part','admin-part')");passed++;
+ // Admin review fix (202609300010): products.write RPCs are the only write
+ // path onto products now, even for Super Admin -- the legacy direct-table
+ // admin_write path this used to exercise no longer exists.
+ await deny("insert into products(name,slug) values('Admin Part','admin-part')");
+ await db.exec("select admin_create_product('Admin Part','admin-part',null,null,null,null,null,null,null,false)");passed++;
  await deny('update profiles set is_admin=false');
  await deny('update orders set final_price=1');
 });
