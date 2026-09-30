@@ -61,6 +61,10 @@ export default function ProductRequestsClient() {
   };
 
   useEffect(() => {
+    // `load` is intentionally shared with handleSave below (re-fetch after a
+    // review decision) -- inlining a separate copy here just for the mount
+    // effect would duplicate that fetch logic.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount, not derived state
     load();
   }, []);
 

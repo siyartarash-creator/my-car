@@ -51,6 +51,10 @@ export default function CouponsClient() {
   };
 
   useEffect(() => {
+    // `load` is intentionally shared with handleSubmit/handleToggleActive/
+    // handleDelete below (re-fetch after a mutation) -- inlining a separate
+    // copy here just for the mount effect would duplicate that fetch logic.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount, not derived state
     load();
   }, []);
 
