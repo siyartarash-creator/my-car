@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs"
+    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs",
+    "test:admin-seed": "node tests/seed-routine-dataset.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

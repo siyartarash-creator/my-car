@@ -116,3 +116,15 @@ pattern rather than rebuilding it):
 
 Do not re-run unchanged foundational security tests without a code change
 that could affect them.
+
+## Deterministic seed dataset
+
+For dashboard/reporting work or manual admin-panel exploration that needs
+realistic-but-known data, reuse `tests/fixtures/admin-routine-seed.mjs`
+(`seedRoutineDataset`/`resetRoutineDataset`, run via
+`npm run test:admin-seed` against an ephemeral PGlite instance) instead of
+inventing ad hoc fixtures. It seeds through the real RPCs (never a raw
+business-table INSERT) so seeded state is exactly as reachable/attackable
+as production data, and returns exact totals computed from what it actually
+inserted for cross-checking dashboard numbers. Local/ephemeral only --
+never point it at Staging or Production.
