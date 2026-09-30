@@ -29,7 +29,8 @@ export default function CheckoutPage() {
   const restored = useRef(false);
   const completedOrder = useRef(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  const [quoted, setQuoted] = useState<{key:string;data:{subtotal:number;shipping:number;discount:number;total:number}} | null>(null);
+  type QuoteItem = { offer_id: number; price: number; quantity: number };
+  const [quoted, setQuoted] = useState<{key:string;data:{subtotal:number;shipping:number;discount:number;total:number;items:QuoteItem[]}} | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -374,7 +375,15 @@ export default function CheckoutPage() {
                   </h3>
 
                   <div className="mb-4 max-h-[250px] space-y-3 overflow-y-auto border-b border-[#39FF14]/10 pb-4">
-                    {items.map((item, idx) => (
+                    {items.map((item, idx) => {
+                      // Once the authoritative quote has resolved, show its
+                      // per-offer price instead of the cart's add-time
+                      // snapshot, so displayed lines can never disagree with
+                      // the server-quoted total below. Before that, the
+                      // snapshot is the only price available yet.
+                      const quotedPrice = quote?.items?.find(qi => qi.offer_id === item.offer_id)?.price;
+                      const unitPrice = quotedPrice ?? item.price;
+                      return (
                       <div
                         key={`${item.product_id}-${item.seller_name}-${idx}`}
                         className="flex gap-3"
@@ -400,10 +409,11 @@ export default function CheckoutPage() {
                           </p>
                         </div>
                         <p className="shrink-0 text-xs font-bold text-[#39FF14]">
-                          {formatToman(item.price * item.quantity)}
+                          {formatToman(unitPrice * item.quantity)}
                         </p>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* کد تخفیف */}

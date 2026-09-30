@@ -36,6 +36,14 @@ type OrderItem = {
   product_name: string;
   product_price: number;
   quantity: number;
+  seller_id: string | null;
+  offer_id: number | null;
+};
+
+type Fulfillment = {
+  id: number;
+  seller_id: string;
+  status: string;
 };
 
 const statusConfig: Record<string, { label: string; color: string; icon: string }> = {
@@ -60,12 +68,31 @@ function formatDate(iso: string): string {
   } catch { return iso; }
 }
 
+function OrderItemRow({ item }: { item: OrderItem }) {
+  return (
+    <div className="flex items-center justify-between border-b border-[#39FF14]/10 pb-3 last:border-0 last:pb-0">
+      <div className="min-w-0 flex-1">
+        <p className="font-bold text-white">{item.product_name}</p>
+        <p className="mt-1 text-xs text-gray-400">
+          {item.quantity.toLocaleString("fa-IR")} عدد ×{" "}
+          {formatToman(item.product_price)}
+        </p>
+      </div>
+      <p className="shrink-0 font-bold text-[#39FF14]">
+        {formatToman(item.product_price * item.quantity)}
+      </p>
+    </div>
+  );
+}
+
 export default function OrderPage() {
   const params = useParams();
   const id = params.id as string;
 
   const [order, setOrder] = useState<Order | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
+  const [fulfillments, setFulfillments] = useState<Fulfillment[]>([]);
+  const [sellerNames, setSellerNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [notFoundError, setNotFoundError] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -85,12 +112,39 @@ export default function OrderPage() {
 
     setOrder(orderData as Order);
 
-    const { data: itemsData } = await supabase
-      .from("order_items")
-      .select("id, product_id, product_name, product_price, quantity")
-      .eq("order_id", id);
+    const [{ data: itemsData }, { data: fulfillmentsData }] = await Promise.all([
+      supabase
+        .from("order_items")
+        .select("id, product_id, product_name, product_price, quantity, seller_id, offer_id")
+        .eq("order_id", id),
+      supabase
+        .from("seller_fulfillments")
+        .select("id, seller_id, status")
+        .eq("order_id", id),
+    ]);
 
-    setItems((itemsData ?? []) as OrderItem[]);
+    const orderItems = (itemsData ?? []) as OrderItem[];
+    setItems(orderItems);
+    setFulfillments((fulfillmentsData ?? []) as Fulfillment[]);
+
+    // Best-effort seller display name via the same offer_id already stored on
+    // each line. This only reuses the existing public offer_read visibility
+    // (active, not hidden) -- no new permission. An offer the seller later
+    // hides/deactivates simply won't resolve here, and the UI falls back to a
+    // neutral per-seller label instead of leaving this unhandled.
+    const offerIds = [...new Set(orderItems.map(i => i.offer_id).filter((v): v is number => v != null))];
+    if (offerIds.length > 0) {
+      const { data: offersData } = await supabase
+        .from("product_sellers")
+        .select("id, seller_id, seller_name")
+        .in("id", offerIds);
+      const names: Record<string, string> = {};
+      for (const o of (offersData ?? []) as { id: number; seller_id: string | null; seller_name: string }[]) {
+        if (o.seller_id && !names[o.seller_id]) names[o.seller_id] = o.seller_name;
+      }
+      setSellerNames(names);
+    }
+
     setLoading(false);
   };
 
@@ -143,6 +197,26 @@ export default function OrderPage() {
   const config = statusConfig[order.status] || statusConfig.pending;
   const canCancel = ["pending", "paid"].includes(order.status);
 
+  // Group by seller only when the order actually spans more than one seller;
+  // a single-seller (or legacy, seller-less) order keeps the original flat
+  // list untouched. The parent order.status above already covers the
+  // single-seller case, since it's derived from that one fulfillment.
+  const distinctSellerIds = [...new Set(items.map(i => i.seller_id).filter((v): v is string => v != null))];
+  const isMultiSeller = distinctSellerIds.length > 1;
+  const sellerGroups = isMultiSeller
+    ? distinctSellerIds.map((sellerId, idx) => {
+        const fulfillment = fulfillments.find(f => f.seller_id === sellerId) ?? null;
+        const fConfig = fulfillment ? statusConfig[fulfillment.status] || statusConfig.pending : null;
+        return {
+          sellerId,
+          items: items.filter(i => i.seller_id === sellerId),
+          label: sellerNames[sellerId] || `بخش فروشنده ${(idx + 1).toLocaleString("fa-IR")}`,
+          fConfig,
+        };
+      })
+    : [];
+  const unassignedItems = isMultiSeller ? items.filter(i => i.seller_id == null) : [];
+
   return (
     <main className="min-h-screen bg-neutral-950 text-white" dir="rtl">
       <header className="border-b border-[#39FF14]/20 px-6 py-4">
@@ -193,25 +267,43 @@ export default function OrderPage() {
           {/* محصولات */}
           <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/60 p-6">
             <h3 className="mb-4 text-lg font-bold text-[#39FF14]">📦 محصولات سفارش</h3>
-            <div className="space-y-3">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between border-b border-[#39FF14]/10 pb-3 last:border-0 last:pb-0"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-white">{item.product_name}</p>
-                    <p className="mt-1 text-xs text-gray-400">
-                      {item.quantity.toLocaleString("fa-IR")} عدد ×{" "}
-                      {formatToman(item.product_price)}
-                    </p>
+            {isMultiSeller ? (
+              <div className="space-y-5">
+                {sellerGroups.map((group) => (
+                  <div key={group.sellerId} className="rounded-xl border border-[#39FF14]/10 bg-neutral-950/40 p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-gray-200">🏪 {group.label}</p>
+                      {group.fConfig && (
+                        <span className={`rounded-full border px-3 py-1 text-xs font-bold ${group.fConfig.color}`}>
+                          {group.fConfig.icon} {group.fConfig.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      {group.items.map((item) => (
+                        <OrderItemRow key={item.id} item={item} />
+                      ))}
+                    </div>
                   </div>
-                  <p className="shrink-0 font-bold text-[#39FF14]">
-                    {formatToman(item.product_price * item.quantity)}
-                  </p>
-                </div>
-              ))}
-            </div>
+                ))}
+                {unassignedItems.length > 0 && (
+                  <div className="rounded-xl border border-[#39FF14]/10 bg-neutral-950/40 p-4">
+                    <p className="mb-3 text-sm font-bold text-gray-200">📦 سایر اقلام</p>
+                    <div className="space-y-3">
+                      {unassignedItems.map((item) => (
+                        <OrderItemRow key={item.id} item={item} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {items.map((item) => (
+                  <OrderItemRow key={item.id} item={item} />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* آدرس */}
