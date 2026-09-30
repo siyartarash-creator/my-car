@@ -35,16 +35,14 @@ export const ADMIN_MODULES: AdminModule[] = [
     items: [{ href: "/admin", label: "داشبورد", icon: "📊", permission: null }],
   },
   {
-    // NOTE: plain product/category CRUD (products, products/new) is not
-    // wired to a specific permission key -- it remains Super-Admin-only via
-    // its pre-existing RLS policy (not named in the locked atomic-audit
-    // list), out of this checkpoint's scope. product-requests and coupons
-    // ARE wired below: both moved to audited RPCs in this checkpoint.
+    // Product create/update/delete moved to audited products.write RPCs
+    // (admin_create_product/admin_update_product/admin_delete_product,
+    // 202609300010) -- same model as every other Store Admin module below.
     key: "store",
     label: "فروشگاه",
     items: [
-      { href: "/admin/products", label: "محصولات", icon: "📦", permission: null },
-      { href: "/admin/products/new", label: "افزودن محصول", icon: "➕", permission: null },
+      { href: "/admin/products", label: "محصولات", icon: "📦", permission: "products.write" },
+      { href: "/admin/products/new", label: "افزودن محصول", icon: "➕", permission: "products.write" },
       {
         href: "/admin/product-requests",
         label: "درخواست‌های محصول",

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { requireAdminAccess } from "@/lib/auth-server";
+import { requirePermission } from "@/lib/auth-server";
 
 export default async function AdminProductsPage() {
-  const { client: supabase } = await requireAdminAccess();
+  const { client: supabase } = await requirePermission("products.write");
   const { data, error } = await supabase
     .from("products")
     .select("id, name, slug, brand, price, discount_price, stock, is_active, is_featured, images")

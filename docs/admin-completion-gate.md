@@ -65,8 +65,8 @@ Static review (this round) confirms these by reading the code; Local
 should still exercise them against a running dev server, since none of
 this was rendered or clicked:
 
-- **Admin permission matrix**: for each of `products.write` (unused —
-  see Known limitation below), `offers.moderate`, `discounts.approve`,
+- **Admin permission matrix**: for each of `products.write`,
+  `offers.moderate`, `discounts.approve`,
   `requests.review`, `orders.read`, `coupons.manage`: an operator holding
   only that key can reach exactly the pages `lib/admin/modules.ts` maps to
   it and no others; an operator holding none of them sees only `/admin`
@@ -135,16 +135,6 @@ this was rendered or clicked:
 
 ## Known limitations carried into this gate (not fixed here — out of scope)
 
-- `app/admin/products` and `app/admin/products/new` remain gated only at
-  the coarse Admin-entry level (`requireAdminAccess()` via the shared
-  layout); the underlying `products`/`categories` tables are still written
-  through the pre-Phase-4 `admin_write` RLS policy
-  (`private.is_admin()`-only, unaudited). `products.write` exists as a
-  permission key with no consumer. This was flagged as deferred in
-  Checkpoint B and remains deferred — not named in the locked atomic-audit
-  list, and converting it is a materially larger change (new RPCs for the
-  full product CRUD surface, including image handling) than this gate's
-  scope.
 - `/admin/audit` and `/admin/orders` list views are capped (200/100 rows)
   with no pagination control — acceptable at this project's current data
   volume; would need real pagination before the row count approaches the

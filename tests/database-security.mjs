@@ -487,6 +487,29 @@ await as(operator,async()=>{
 });
 await check(`select count(*)::int from admin_audit_log where action='review_product_request' and target_id='${prId}' and actor_id='${operator}'`,1);
 
+// --- Admin review fix (202609300010): review_product_request finality.
+// Only a 'pending' request may be reviewed; once decided (contacted/approved/
+// rejected) a further call must fail, leave status unchanged, and append no
+// new audit row -- mirroring the status='pending' guard already enforced by
+// approve_discount_request/reject_discount_request.
+await as(operator,async()=>{
+ await deny(`select review_product_request(${prId},'rejected','flip-flop attempt')`); // already approved, not pending
+ await check(`select status from product_requests where id=${prId}`,'approved'); // status unchanged after failed re-decision
+});
+await check(`select count(*)::int from admin_audit_log where action='review_product_request' and target_id='${prId}'`,1); // no new audit row from the failed re-decision
+
+let prId2;
+await as(seller,async()=>{
+ await db.exec("insert into product_requests(seller_id,seller_name,product_name) values(auth.uid(),'Seller','Checkpoint B Part 2')");
+ prId2=(await db.query("select id from product_requests where product_name='Checkpoint B Part 2'")).rows[0].id;
+});
+await as(operator,async()=>{
+ await db.exec(`select review_product_request(${prId2},'rejected','not applicable')`);passed++; // pending -> rejected succeeds
+ await deny(`select review_product_request(${prId2},'approved','changed my mind')`); // rejected -> another decision fails
+ await check(`select status from product_requests where id=${prId2}`,'rejected'); // status unchanged after failed re-decision
+});
+await check(`select count(*)::int from admin_audit_log where action='review_product_request' and target_id='${prId2}'`,1); // no new audit row from the failed re-decision
+
 // --- coupons: admin_create_coupon / admin_set_coupon_active / admin_delete_coupon
 // (replaces the old direct INSERT/UPDATE/DELETE admin_write policy).
 await as(buyer,()=>deny("select admin_create_coupon('CKB10','percent',10,0,null,1,null,null)"));
@@ -522,6 +545,64 @@ await as(buyer,()=>check(`select count(*)::int from product_sellers where id=${o
 // --- order_read widened for orders.read operators (read-only; no write grant/policy added).
 await as(operator,async()=>{ const n=(await db.query('select count(*)::int n from orders')).rows[0].n; assert.ok(n>0);passed++; });
 await as(seller,async()=>{ await check('select count(*)::int from orders',0); }); // seller holds no orders.read grant and owns no orders
+
+// --- Admin review fix (202609300010): products.write -- admin_create_product
+// / admin_update_product / admin_delete_product (replaces the legacy
+// admin_write-gated direct INSERT/UPDATE/DELETE on products, matching the
+// coupons/product_requests conversion in 202609300008). `productOperator` is
+// a fresh profile granted only products.write; `operator` deliberately does
+// NOT hold products.write (it holds discounts.approve/offers.moderate/
+// requests.review/coupons.manage/orders.read only), so it doubles as the
+// "unrelated-permission operator must be denied" case.
+const productOperator='00000000-0000-0000-0000-000000000005';
+await db.exec(`insert into auth.users values ('${productOperator}','{"name":"Product Admin","mobile":"09100000005","user_type":"owner"}')`);
+await as(other,async()=>{ await db.exec(`select admin_grant_permission('${productOperator}','products.write')`);passed++; });
+
+const createSql="select admin_create_product('New Part','new-part-ckfix',null,null,null,null,null,null,null,false)";
+await as(null,()=>deny(createSql));
+await as(buyer,()=>deny(createSql));
+await as(operator,()=>deny(createSql)); // unrelated permissions only, not products.write
+
+let newProductId;
+await as(productOperator,async()=>{
+ await deny("select admin_create_product('AB','ab-part-ckfix',null,null,null,null,null,null,null,false)"); // name too short
+ await deny("select admin_create_product('Valid Name','Not A Slug!',null,null,null,null,null,null,null,false)"); // invalid slug
+ newProductId=(await db.query(createSql)).rows[0].admin_create_product;
+ await check(`select is_active from products where id=${newProductId}`,true);
+ await deny(`insert into products(name,slug) values('Bypass','bypass-part-ckfix')`); // direct-table insert blocked
+ await deny(`update products set name='Bypass' where id=${newProductId}`); // direct-table update blocked, even for a products.write holder
+});
+await check(`select count(*)::int from admin_audit_log where action='create_product' and target_id='${newProductId}' and actor_id='${productOperator}'`,1);
+await check(`select count(*)::int from admin_audit_log where action='create_product' and actor_id='${operator}'`,0); // the earlier denied attempt was not audited
+
+await as(seller,()=>deny(`select admin_update_product(${newProductId},'Nope','new-part-ckfix',null,null,null,null,null,null,null,true,true)`));
+await as(other,async()=>{ // Super Admin bypass
+ await db.exec(`select admin_update_product(${newProductId},'New Part Updated','new-part-ckfix',null,null,null,null,null,null,null,true,true)`);passed++;
+ await check(`select name from products where id=${newProductId}`,'New Part Updated');
+});
+await check(`select count(*)::int from admin_audit_log where action='update_product' and target_id='${newProductId}' and actor_id='${other}'`,1);
+
+// product_read widened for products.write operators (parallel to offer_read/
+// coupon_read/order_read/request_read): they must see inactive products too,
+// to manage them -- but an unrelated-permission operator, an ordinary buyer,
+// and anon must not.
+let hiddenProductId;
+await as(productOperator,async()=>{
+ hiddenProductId=(await db.query("select admin_create_product('Hidden Part','hidden-part-ckfix',null,null,null,null,null,null,null,false)")).rows[0].admin_create_product;
+ await db.exec(`select admin_update_product(${hiddenProductId},'Hidden Part','hidden-part-ckfix',null,null,null,null,null,null,null,false,false)`);passed++;
+});
+await as(productOperator,()=>check(`select count(*)::int from products where id=${hiddenProductId}`,1));
+await as(buyer,()=>check(`select count(*)::int from products where id=${hiddenProductId}`,0));
+await as(null,()=>check(`select count(*)::int from products where id=${hiddenProductId}`,0));
+await as(operator,()=>check(`select count(*)::int from products where id=${hiddenProductId}`,0));
+
+await as(buyer,()=>deny(`select admin_delete_product(${hiddenProductId})`));
+await as(productOperator,()=>deny(`delete from products where id=${hiddenProductId}`)); // direct-table delete blocked, even for a products.write holder
+await as(productOperator,async()=>{ await db.exec(`select admin_delete_product(${hiddenProductId})`);passed++; });
+await check(`select count(*)::int from products where id=${hiddenProductId}`,0);
+await as(productOperator,async()=>{ await db.exec(`select admin_delete_product(${newProductId})`);passed++; });
+await check(`select count(*)::int from products where id=${newProductId}`,0);
+await check(`select count(*)::int from admin_audit_log where action='delete_product' and actor_id='${productOperator}'`,2);
 
 // Admin Panel Completion, Checkpoint C: Audit View stays Super-Admin-only.
 // `operator` by this point holds discounts.approve, offers.moderate,
