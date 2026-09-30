@@ -83,22 +83,36 @@ async function asRole(db, uid, fn) {
 export async function seedRoutineDataset(db) {
   const S = SEED_IDENTITIES;
 
-  // === 1. Bootstrap identities (bypasses RLS: superuser db.exec, same
-  // convention tests/database-security.mjs already uses for auth.users/
-  // profiles bootstrap -- nothing else can create these rows). ===========
+  // === 1. Bootstrap identities via auth.users + raw_user_meta_data, the
+  // same pattern every real identity in tests/database-security.mjs uses
+  // (e.g. its own `insert into auth.users values ('${buyer}','{"name":...,
+  // "mobile":...,"user_type":...}')`), NOT a direct public.profiles
+  // INSERT. public.profiles has its own trigger, private.create_profile()
+  // (supabase/migrations/202609290001_security_foundation.sql), that fires
+  // AFTER INSERT on auth.users and derives name/user_type/mobile from
+  // new.raw_user_meta_data, requiring name length>=3 and mobile matching
+  // ^09[0-9]{9}$ -- an auth.users row inserted with no metadata (or a
+  // separate direct profiles INSERT racing/duplicating it) is exactly the
+  // "invalid_profile" contract violation this fixes. The trigger also
+  // always hardcodes is_admin=false regardless of metadata (by design --
+  // see the existing "Trusted server-side profile creation ignores forged
+  // administrator metadata" test) -- so the Super Admin identity is
+  // created the same way `other` is made Super Admin in
+  // tests/database-security.mjs: a plain profile first, then a direct
+  // `update profiles set is_admin=true` as a separate, explicit step. ====
   const allProfiles = [
-    { ...S.admin, user_type: "owner", is_admin: true },
-    ...S.operators.map((o) => ({ ...o, user_type: "owner", is_admin: false })),
-    ...S.sellers.map((s) => ({ ...s, user_type: "seller", is_admin: false })),
-    ...S.buyers.map((b) => ({ ...b, user_type: "owner", is_admin: false })),
+    { ...S.admin, user_type: "owner" },
+    ...S.operators.map((o) => ({ ...o, user_type: "owner" })),
+    ...S.sellers.map((s) => ({ ...s, user_type: "seller" })),
+    ...S.buyers.map((b) => ({ ...b, user_type: "owner" })),
   ];
   for (const p of allProfiles) {
+    const metadata = JSON.stringify({ name: p.name, mobile: p.mobile, user_type: p.user_type });
     await db.exec(
-      `insert into auth.users(id) values ('${p.id}') on conflict (id) do nothing;
-       insert into public.profiles(id,user_type,name,mobile,is_admin) values ('${p.id}','${p.user_type}','${p.name}','${p.mobile}',${p.is_admin})
-       on conflict (id) do nothing;`,
+      `insert into auth.users(id,raw_user_meta_data) values ('${p.id}','${metadata}') on conflict (id) do nothing;`,
     );
   }
+  await db.exec(`update public.profiles set is_admin=true where id='${S.admin.id}'`);
 
   // === 2. Operator permission grants (admin_grant_permission, as Super
   // Admin) -- 4 distinct combinations, as required. ======================
