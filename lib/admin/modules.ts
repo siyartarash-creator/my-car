@@ -35,11 +35,11 @@ export const ADMIN_MODULES: AdminModule[] = [
     items: [{ href: "/admin", label: "داشبورد", icon: "📊", permission: null }],
   },
   {
-    // NOTE: these existing Store pages are not yet wired to specific
-    // permission keys -- they still gate at the coarse Admin-entry level
-    // (requireAdminAccess), same as before this checkpoint. Per-page
-    // permission enforcement (products.write, requests.review, ...) for this
-    // module is Checkpoint B (Store Admin Module) scope; see SKILL.md.
+    // NOTE: plain product/category CRUD (products, products/new) is not
+    // wired to a specific permission key -- it remains Super-Admin-only via
+    // its pre-existing RLS policy (not named in the locked atomic-audit
+    // list), out of this checkpoint's scope. product-requests and coupons
+    // ARE wired below: both moved to audited RPCs in this checkpoint.
     key: "store",
     label: "فروشگاه",
     items: [
@@ -49,10 +49,13 @@ export const ADMIN_MODULES: AdminModule[] = [
         href: "/admin/product-requests",
         label: "درخواست‌های محصول",
         icon: "📨",
-        permission: null,
+        permission: "requests.review",
         badgeKey: "pendingProductRequests",
       },
-      { href: "/admin/coupons", label: "کدهای تخفیف", icon: "🏷️", permission: null },
+      { href: "/admin/coupons", label: "کدهای تخفیف", icon: "🏷️", permission: "coupons.manage" },
+      { href: "/admin/discount-requests", label: "درخواست‌های تخفیف", icon: "💸", permission: "discounts.approve" },
+      { href: "/admin/offers", label: "مدیریت آگهی‌ها", icon: "🛒", permission: "offers.moderate" },
+      { href: "/admin/orders", label: "سفارشات", icon: "🛍️", permission: "orders.read" },
     ],
   },
   {

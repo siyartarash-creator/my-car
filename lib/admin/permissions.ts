@@ -9,6 +9,7 @@ export const PERMISSION_KEYS = [
   "discounts.approve",
   "requests.review",
   "orders.read",
+  "coupons.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -19,6 +20,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "discounts.approve": "تایید/رد درخواست تخفیف بالای سقف",
   "requests.review": "بررسی درخواست‌های محصول جدید",
   "orders.read": "مشاهده سفارش‌ها",
+  "coupons.manage": "مدیریت کدهای تخفیف",
 };
 
 export function isPermissionKey(value: string): value is PermissionKey {

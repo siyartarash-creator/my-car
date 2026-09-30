@@ -459,6 +459,70 @@ await as(operator,async()=>{
 await as(buyer,()=>check('select count(*)::int from operator_permissions',0));
 await as(null,()=>deny('select count(*)::int from operator_permissions'));
 
+// Admin Panel Completion, Checkpoint B: Store Admin Module.
+// Grant `operator` the remaining permissions this checkpoint wires up, on
+// top of the discounts.approve/offers.moderate it already holds.
+await as(other,async()=>{
+ await db.exec(`select admin_grant_permission('${operator}','requests.review');
+  select admin_grant_permission('${operator}','coupons.manage');
+  select admin_grant_permission('${operator}','orders.read')`);passed++;
+});
+
+// --- product_requests: review_product_request (replaces the old direct
+// admin UPDATE path; now audited and permission-gated, not is_admin()-only).
+let prId;
+await as(seller,async()=>{
+ await db.exec("insert into product_requests(seller_id,seller_name,product_name) values(auth.uid(),'Seller','Checkpoint B Part')");
+ prId=(await db.query("select id from product_requests where product_name='Checkpoint B Part'")).rows[0].id;
+});
+await as(buyer,()=>deny(`select review_product_request(${prId},'approved',null)`));
+await as(seller,()=>deny(`select review_product_request(${prId},'approved',null)`)); // request owner, not reviewer
+await as(operator,async()=>{
+ await deny(`select review_product_request(${prId},'pending',null)`); // pending is initial-only, not a decision
+ await db.exec(`select review_product_request(${prId},'approved','looks good')`);passed++;
+ await check(`select status from product_requests where id=${prId}`,'approved');
+ await check(`select admin_notes from product_requests where id=${prId}`,'looks good');
+ // direct-table bypass blocked even for a caller who holds requests.review: only the RPC writes.
+ await deny(`update product_requests set status='rejected' where id=${prId}`);
+});
+await check(`select count(*)::int from admin_audit_log where action='review_product_request' and target_id='${prId}' and actor_id='${operator}'`,1);
+
+// --- coupons: admin_create_coupon / admin_set_coupon_active / admin_delete_coupon
+// (replaces the old direct INSERT/UPDATE/DELETE admin_write policy).
+await as(buyer,()=>deny("select admin_create_coupon('CKB10','percent',10,0,null,1,null,null)"));
+let couponId;
+await as(operator,async()=>{
+ await deny("select admin_create_coupon('XY','percent',10,0,null,1,null,null)"); // too short
+ await deny("select admin_create_coupon('CKB10','percent',150,0,null,1,null,null)"); // >100%
+ couponId=(await db.query("select admin_create_coupon('ckb10','percent',10,0,null,1,null,'checkpoint b')")).rows[0].admin_create_coupon;
+ await check(`select code from coupons where id=${couponId}`,'CKB10'); // normalized upper/trimmed
+ await deny(`insert into coupons(code,discount_type,discount_value) values('BYPASS','fixed',1)`); // direct write blocked
+ await db.exec(`select admin_set_coupon_active(${couponId},false)`);passed++;
+ await check(`select is_active from coupons where id=${couponId}`,false);
+});
+await check(`select count(*)::int from admin_audit_log where action='create_coupon' and target_id='${couponId}' and actor_id='${operator}'`,1);
+await check(`select count(*)::int from admin_audit_log where action='deactivate_coupon' and target_id='${couponId}' and actor_id='${operator}'`,1);
+await as(seller,()=>deny(`select admin_delete_coupon(${couponId})`));
+await as(operator,async()=>{ await db.exec(`select admin_delete_coupon(${couponId})`);passed++; });
+await check(`select count(*)::int from coupons where id=${couponId}`,0);
+await check(`select count(*)::int from admin_audit_log where action='delete_coupon' and actor_id='${operator}'`,1);
+
+// --- offer_read widened for offers.moderate/discounts.approve operators (not
+// just the Offer's own seller or Super Admin), needed for the Store Admin
+// Offer-moderation / discount-request pages to list/display inactive Offers.
+const pCkB=(await db.query("insert into products(name,slug) values('Checkpoint B Part','checkpoint-b-part') returning id")).rows[0].id;
+let offerCkB;
+await as(seller,async()=>{
+ offerCkB=(await db.query(`select public.save_offer(${pCkB},null,60000,null,3,null,null,null,false)`)).rows[0].save_offer;
+});
+await as(operator,async()=>{ await db.exec(`select deactivate_offer(${offerCkB},'checkpoint b visibility test')`);passed++; });
+await as(operator,()=>check(`select count(*)::int from product_sellers where id=${offerCkB}`,1)); // offers.moderate operator can still see it
+await as(buyer,()=>check(`select count(*)::int from product_sellers where id=${offerCkB}`,0)); // inactive + not owner + no permission
+
+// --- order_read widened for orders.read operators (read-only; no write grant/policy added).
+await as(operator,async()=>{ const n=(await db.query('select count(*)::int n from orders')).rows[0].n; assert.ok(n>0);passed++; });
+await as(seller,async()=>{ await check('select count(*)::int from orders',0); }); // seller holds no orders.read grant and owns no orders
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);
