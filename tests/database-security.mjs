@@ -150,6 +150,72 @@ await as(seller,async()=>{
  await deny("insert into product_requests(seller_id,product_name,status) values(auth.uid(),'Request','approved')");
  await deny("insert into products(name,slug) values('Unauthorized','unauthorized')");
 });
+// Phase 4 / Task 4.2A: above-threshold discount request foundation.
+// Fixture rows above were inserted with explicit ids, never advancing product_sellers_id_seq;
+// sync it so save_offer's nextval()-backed inserts below don't collide with those ids.
+await db.exec("select setval('product_sellers_id_seq', (select coalesce(max(id),0) from product_sellers))");
+const pA=(await db.query("insert into products(name,slug) values('Discount Part A','discount-part-a') returning id")).rows[0].id;
+const pB=(await db.query("insert into products(name,slug) values('Discount Part B','discount-part-b') returning id")).rows[0].id;
+let offerA;
+await as(seller,async()=>{
+ // 1. below-threshold discount applies live.
+ offerA=(await db.query(`select public.save_offer(${pA},null,100000,70000,5,null,null,null,false)`)).rows[0].save_offer;
+ await check(`select discount_price from product_sellers where id=${offerA}`,70000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA}`,0);
+ // 2. exactly-threshold discount (35%) applies live.
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,65000,5,null,null,null,false)`);
+ await check(`select discount_price from product_sellers where id=${offerA}`,65000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA}`,0);
+ // 3. above-threshold (50%) request is created but the requested discount is NOT live.
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,50000,5,null,null,null,false)`);
+ await check(`select discount_price from product_sellers where id=${offerA}`,65000);
+ await check(`select status from discount_requests where offer_id=${offerA} and requested_discount_price=50000`,'pending');
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA} and status='pending'`,1);
+ // 4. previously-approved live discount remains unchanged while the request is pending.
+ await check(`select price from product_sellers where id=${offerA}`,100000);
+ await check(`select discount_price from product_sellers where id=${offerA}`,65000);
+ // Edge case E: same call changes base price AND asks above threshold -> rejected, nothing changes.
+ await deny(`select public.save_offer(${pA},${offerA},120000,50000,5,null,null,null,false)`);
+ await check(`select price from product_sellers where id=${offerA}`,100000);
+ await check(`select discount_price from product_sellers where id=${offerA}`,65000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA} and status='pending'`,1);
+ // Base price CAN change while a request is pending, when the same call is not itself an
+ // above-threshold ask: this supersedes the stale pending request instead of leaving it dangling.
+ await db.exec(`select public.save_offer(${pA},${offerA},90000,60000,5,null,null,null,false)`);
+ await check(`select price from product_sellers where id=${offerA}`,90000);
+ await check(`select discount_price from product_sellers where id=${offerA}`,60000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA} and status='pending'`,0);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA} and status='superseded'`,1);
+ // A brand-new Offer created directly above threshold: no live discount, one pending request.
+ const offerB=(await db.query(`select public.save_offer(${pB},null,200000,100000,5,null,null,null,false)`)).rows[0].save_offer;
+ await check(`select discount_price from product_sellers where id=${offerB}`,null);
+ await check(`select price from product_sellers where id=${offerB}`,200000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerB} and status='pending' and base_price_snapshot=200000 and requested_discount_price=100000`,1);
+ // 9. invalid request values are rejected (existing invariant, still enforced with the new logic present).
+ await deny(`select public.save_offer(${pA},${offerA},90000,0,5,null,null,null,false)`);
+ await deny(`select public.save_offer(${pA},${offerA},90000,95000,5,null,null,null,false)`);
+ // 5. ordinary seller cannot approve their own request: no permission, no direct-write route.
+ await check("select has_permission('discounts.approve')",false);
+ await deny(`update discount_requests set status='approved' where offer_id=${offerA}`);
+ await deny(`insert into discount_requests(offer_id,seller_id,base_price_snapshot,requested_discount_price,status) values(${offerA},auth.uid(),90000,1,'approved')`);
+ await deny(`select admin_grant_permission(auth.uid(),'discounts.approve')`);
+ // 7. no direct table/RPC bypass can make an above-threshold discount live.
+ await deny(`update product_sellers set discount_price=1 where id=${offerA}`);
+});
+await as(other,async()=>{
+ // 6. a seller cannot create/manage a discount request for another seller's Offer (IDOR).
+ await deny(`select public.save_offer(${pA},${offerA},90000,50000,5,null,null,null,false)`);
+ await deny(`insert into discount_requests(offer_id,seller_id,base_price_snapshot,requested_discount_price) values(${offerA},auth.uid(),90000,1)`);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerA} and seller_id='${other}'`,0);
+});
+// 8. the threshold is read from marketplace_settings, not a duplicated literal.
+await db.exec('update marketplace_settings set seller_autonomous_discount_max_percent=50 where id=1');
+await as(seller,async()=>{
+ // 40% off was above the old 35% threshold; at the new 50% threshold it applies live directly.
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,60000,5,null,null,null,false)`);
+ await check(`select discount_price from product_sellers where id=${offerA}`,60000);
+});
+await db.exec('update marketplace_settings set seller_autonomous_discount_max_percent=35 where id=1');
 await db.exec(`update profiles set is_admin=true where id='${other}'`);
 await as(other,async()=>{
  await check('select is_admin()',true);
