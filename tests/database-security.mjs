@@ -523,6 +523,18 @@ await as(buyer,()=>check(`select count(*)::int from product_sellers where id=${o
 await as(operator,async()=>{ const n=(await db.query('select count(*)::int n from orders')).rows[0].n; assert.ok(n>0);passed++; });
 await as(seller,async()=>{ await check('select count(*)::int from orders',0); }); // seller holds no orders.read grant and owns no orders
 
+// Admin Panel Completion, Checkpoint C: Audit View stays Super-Admin-only.
+// `operator` by this point holds discounts.approve, offers.moderate,
+// requests.review, coupons.manage and orders.read -- i.e. every operator
+// permission this checkpoint's dashboard/audit work touches -- yet must
+// still see zero admin_audit_log rows, proving the Checkpoint C locked
+// decision (no operator audit-read permission was added) actually holds at
+// the RLS layer, not just in the page's requireSuperAdmin() call.
+await as(operator,()=>check('select count(*)::int from admin_audit_log',0));
+await as(buyer,()=>check('select count(*)::int from admin_audit_log',0));
+await as(null,()=>deny('select count(*)::int from admin_audit_log'));
+await as(other,async()=>{ const n=(await db.query('select count(*)::int n from admin_audit_log')).rows[0].n; assert.ok(n>0);passed++; }); // Super Admin sees the full log
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);

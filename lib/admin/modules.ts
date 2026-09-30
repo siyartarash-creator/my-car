@@ -62,7 +62,13 @@ export const ADMIN_MODULES: AdminModule[] = [
     key: "operators",
     label: "مدیریت دسترسی",
     superAdminOnly: true,
-    items: [{ href: "/admin/operators", label: "اپراتورها", icon: "🛡️", permission: null }],
+    items: [
+      { href: "/admin/operators", label: "اپراتورها", icon: "🛡️", permission: null },
+      // Read-only audit view (Checkpoint C); admin_audit_log's own RLS is
+      // Super-Admin-only, so this module entry needs no permission field --
+      // superAdminOnly above already covers it.
+      { href: "/admin/audit", label: "گزارش عملیات", icon: "🧾", permission: null },
+    ],
   },
 ];
 
