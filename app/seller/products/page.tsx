@@ -161,9 +161,22 @@ export default function SellerProductsPage() {
 
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/60 p-12 text-center text-gray-400">
-          {tab === "mine"
-            ? "هنوز محصولی قیمت‌گذاری نکردی. از تب «همه قطعات» شروع کن."
-            : "محصولی با این فیلترها پیدا نشد"}
+          {tab === "mine" ? (
+            "هنوز محصولی قیمت‌گذاری نکردی. از تب «همه قطعات» شروع کن."
+          ) : (
+            <>
+              <p>محصولی با این فیلترها پیدا نشد</p>
+              <p className="mt-4 text-sm text-gray-500">
+                قطعه‌ای که دنبالشی توی لیست نیست؟
+              </p>
+              <Link
+                href={`/seller/requests/new${search.trim() ? `?name=${encodeURIComponent(search.trim())}` : ""}`}
+                className="mt-3 inline-block rounded-lg bg-[#39FF14] px-6 py-2.5 text-sm font-bold text-black transition hover:bg-[#39FF14]/90"
+              >
+                ➕ درخواست قطعه جدید
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

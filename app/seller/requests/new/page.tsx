@@ -1,16 +1,25 @@
 "use client";
 import { getCurrentUserId } from "@/lib/auth-client";
 
-import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 export default function NewRequestPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewRequestForm />
+    </Suspense>
+  );
+}
+
+function NewRequestForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [productName, setProductName] = useState("");
+  const [productName, setProductName] = useState(searchParams.get("name") || "");
   const [brand, setBrand] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
