@@ -58,10 +58,18 @@ async function getSellers(productId: number): Promise<SellerRow[]> {
     .eq("is_active", true)
     .eq("is_hidden_by_seller", false)
     .gt("stock", 0)
+    .gt("price", 0)
     .order("price", { ascending: true });
 
   if (error) return [];
-  return (data ?? []) as SellerRow[];
+  // discount_price <= price is a column-to-column comparison, which
+  // PostgREST filters can't express, so it's applied here -- still entirely
+  // server-side (this runs in the Server Component, never in the browser),
+  // matching the same invariant checkout and shop_catalog already enforce:
+  // a non-null discount_price is only valid when > 0 and <= price.
+  return (data ?? []).filter(
+    (s) => s.discount_price == null || (s.discount_price > 0 && s.discount_price <= s.price)
+  ) as SellerRow[];
 }
 
 function formatToman(amount: number): string {
