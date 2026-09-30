@@ -440,6 +440,25 @@ await as(operator,()=>deny(`select deactivate_offer(${offerD},'should not apply'
 await check(`select is_active from product_sellers where id=${offerD}`,true);
 await db.exec('drop trigger fail_audit on admin_audit_log; drop function public.test_audit_failure()');
 
+// Admin Panel Completion, Checkpoint A: Admin Core entry boundary
+// (has_any_permission) and the operator_permissions self-read policy.
+// `operator` already holds 'discounts.approve' and 'offers.moderate' from
+// the Task 4.2B/4.3 sections above; `other` is Super Admin; `buyer`/`seller`
+// hold no operator_permissions grants.
+await as(null,()=>check('select has_any_permission()',false));
+await as(buyer,()=>check('select has_any_permission()',false));
+await as(seller,()=>check('select has_any_permission()',false));
+await as(operator,()=>check('select has_any_permission()',true));
+await as(other,()=>check('select has_any_permission()',true));
+await as(operator,async()=>{
+ // self-read: an operator can see exactly their own grant rows (2: the
+ // 4.2B/4.3 grants above), and nothing granted to a different profile.
+ await check("select count(*)::int from operator_permissions where profile_id=auth.uid()",2);
+ await check(`select count(*)::int from operator_permissions where profile_id<>auth.uid()`,0);
+});
+await as(buyer,()=>check('select count(*)::int from operator_permissions',0));
+await as(null,()=>deny('select count(*)::int from operator_permissions'));
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);

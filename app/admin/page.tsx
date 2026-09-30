@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth-server";
+import { requireAdminAccess } from "@/lib/auth-server";
 
 export default async function AdminDashboard() {
-  const { client: supabase } = await requireRole("admin");
+  const { client: supabase } = await requireAdminAccess();
   const [productsRes, ordersRes, usersRes, sellersRes] = await Promise.all([
     supabase.from("products").select("id", { count: "exact", head: true }),
     supabase.from("orders").select("id", { count: "exact", head: true }),
