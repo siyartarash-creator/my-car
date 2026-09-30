@@ -338,6 +338,108 @@ await as(other,async()=>{
  await deny(`update product_sellers set discount_price=1 where id=${offerA}`);
 });
 
+// Phase 4 / Task 4.3: offer moderation (activate/deactivate) foundation.
+await as(other,async()=>{ await db.exec(`select admin_grant_permission('${operator}','offers.moderate')`);passed++; });
+await check(`select count(*)::int from operator_permissions where profile_id='${operator}' and permission_key='offers.moderate'`,1);
+
+const pD=(await db.query("insert into products(name,slug) values('Moderation Part D','moderation-part-d') returning id")).rows[0].id;
+const pE=(await db.query("insert into products(name,slug) values('Moderation Part E','moderation-part-e') returning id")).rows[0].id;
+let offerD, offerE;
+await as(seller,async()=>{
+ offerD=(await db.query(`select public.save_offer(${pD},null,80000,70000,4,'w','s','n',false)`)).rows[0].save_offer;
+ offerE=(await db.query(`select public.save_offer(${pE},null,90000,null,2,null,null,null,false)`)).rows[0].save_offer;
+});
+await check(`select is_active from product_sellers where id=${offerD}`,true);
+
+// 3. unauthorized user cannot deactivate.
+await as(buyer,()=>deny(`select deactivate_offer(${offerD},'counterfeit parts')`));
+// 4. seller cannot deactivate/activate own Offer by ownership alone.
+await as(seller,()=>deny(`select deactivate_offer(${offerD},'counterfeit parts')`));
+await as(seller,()=>deny(`select activate_offer(${offerD})`));
+// 12. save_offer cannot manipulate is_active -- it takes no is_active parameter at all, and a
+// normal update call leaves the flag untouched.
+await as(seller,async()=>{
+ await db.exec(`select public.save_offer(${pD},${offerD},80000,70000,4,'w','s','n',false)`);
+ await check(`select is_active from product_sellers where id=${offerD}`,true);
+});
+// 11. direct client update of is_active is blocked, even for a caller who holds offers.moderate
+// or is Super Admin -- only the RPCs (owned by the table owner) may write it.
+await as(operator,()=>deny(`update product_sellers set is_active=false where id=${offerD}`));
+await as(other,()=>deny(`update product_sellers set is_active=false where id=${offerD}`));
+
+// 5. empty/whitespace/absent deactivation reason rejected.
+await as(operator,async()=>{
+ await deny(`select deactivate_offer(${offerD},null)`);
+ await deny(`select deactivate_offer(${offerD},'')`);
+ await deny(`select deactivate_offer(${offerD},'   ')`);
+ await check(`select is_active from product_sellers where id=${offerD}`,true);
+});
+
+// 2. an offers.moderate operator (not Super Admin) can deactivate, given a real reason.
+await as(operator,async()=>{ await db.exec(`select deactivate_offer(${offerD},'Counterfeit parts reported by buyers')`);passed++; });
+// offer_read (pre-existing, Phase 1 RLS, unchanged by this task) only lets a non-admin see an
+// Offer that is is_active=true, its own, or the caller is_admin() -- holding offers.moderate
+// does not itself grant read access to an Offer just deactivated, same as discounts.approve
+// does not grant admin_audit_log read. So state is verified here (bypasses RLS, same
+// convention as every other post-condition check in this file), not inside the operator role.
+// 6. successful deactivation sets only the intended is_active state.
+await check(`select is_active from product_sellers where id=${offerD}`,false);
+// 15. price/stock/discount fields remain unchanged by moderation.
+await check(`select price from product_sellers where id=${offerD}`,80000);
+await check(`select discount_price from product_sellers where id=${offerD}`,70000);
+await check(`select stock from product_sellers where id=${offerD}`,4);
+// 7. deactivation audit contains trusted actor, target and reason.
+await check(`select count(*)::int from admin_audit_log where action='deactivate_offer' and target_id='${offerD}' and actor_id='${operator}' and reason='Counterfeit parts reported by buyers'`,1);
+
+// 17. an inactive Offer remains excluded/rejected wherever the existing catalog/checkout
+// contract already requires it (verified, not redesigned: shop_catalog and private.checkout
+// already filter/reject on is_active independently of this task).
+await check(`select count(*)::int from shop_catalog where offer_id=${offerD}`,0);
+await as(buyer,()=>deny(`select quote_checkout('[{"offer_id":${offerD},"quantity":1}]',null)`));
+
+// 1. Super Admin can activate too (the deactivate path above already exercised the operator
+// grant; here the Super Admin bypass is exercised explicitly on activation).
+await as(other,async()=>{
+ await db.exec(`select activate_offer(${offerD})`);passed++;
+ // 8. Super Admin/operator can activate.
+ await check(`select is_active from product_sellers where id=${offerD}`,true);
+});
+// 9. activation audited.
+await check(`select count(*)::int from admin_audit_log where action='activate_offer' and target_id='${offerD}' and actor_id='${other}'`,1);
+// 10. unauthorized activation denied.
+await as(buyer,()=>deny(`select activate_offer(${offerD})`));
+await as(seller,()=>deny(`select activate_offer(${offerD})`));
+
+// 13. cross-Offer/IDOR: moderating offerD never touches an unrelated Offer.
+await check(`select is_active from product_sellers where id=${offerE}`,true);
+await check(`select discount_price from product_sellers where id=${offerE}`,null);
+
+// 16. pending discount-request state remains unchanged by moderation; moderation never
+// touches discount_requests. 18. existing 4.2 discount behavior is not weakened by adding
+// moderation.
+let reqE;
+await as(seller,async()=>{
+ await db.exec(`select public.save_offer(${pE},${offerE},90000,40000,2,null,null,null,false)`); // ~55.6% off, above threshold -> pending
+ reqE=(await db.query(`select id from discount_requests where offer_id=${offerE} and status='pending' order by id desc limit 1`)).rows[0].id;
+});
+await as(operator,async()=>{ await db.exec(`select deactivate_offer(${offerE},'temporary listing pause')`);passed++; });
+await check(`select status from discount_requests where id=${reqE}`,'pending');
+await check(`select discount_price from product_sellers where id=${offerE}`,null);
+await as(operator,async()=>{
+ await db.exec(`select activate_offer(${offerE})`);passed++;
+ await db.exec(`select approve_discount_request(${reqE})`);passed++;
+ await check(`select discount_price from product_sellers where id=${offerE}`,40000);
+ await check(`select status from discount_requests where id=${reqE}`,'approved');
+});
+
+// 14. an audit failure rolls back the moderation atomically (mirrors the existing
+// coupon_usages rollback test elsewhere in this file).
+await db.exec(`create function public.test_audit_failure() returns trigger language plpgsql as $$begin raise exception 'injected_audit_failure'; end$$;
+create trigger fail_audit before insert on admin_audit_log for each row execute function public.test_audit_failure();`);
+await as(operator,()=>deny(`select deactivate_offer(${offerD},'should not apply')`));
+await check(`select is_active from product_sellers where id=${offerD}`,true);
+await db.exec('drop trigger fail_audit on admin_audit_log; drop function public.test_audit_failure()');
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);
