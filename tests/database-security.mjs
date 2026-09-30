@@ -223,6 +223,121 @@ await as(other,async()=>{
  await deny('update profiles set is_admin=false');
  await deny('update orders set final_price=1');
 });
+// Phase 4 / Task 4.2B: discount request approval / rejection.
+// `other` is Super Admin (is_admin=true above); `operator` gets only the
+// discounts.approve grant, to independently prove the non-admin path works.
+const operator='00000000-0000-0000-0000-000000000004';
+await as(other,async()=>{ await db.exec(`select admin_grant_permission('${operator}','discounts.approve')`);passed++; });
+await check(`select count(*)::int from operator_permissions where profile_id='${operator}' and permission_key='discounts.approve'`,1);
+
+// P2 lock-order fix regression: approve_discount_request now locates its Offer via an
+// UNLOCKED probe read before taking any row lock (Offer locked first, then Request --
+// matching save_offer's own order, to remove the deadlock-prone Request-first order a
+// prior revision used). A nonexistent request must still fail cleanly through that new
+// two-phase lookup instead of erroring some other way.
+await as(operator,()=>deny('select approve_discount_request(999999)'));
+
+let reqId;
+await as(seller,async()=>{
+ // Fresh above-threshold ask on the existing offerA (price=100000, live discount=60000); price unchanged, so this is the unambiguous pending path.
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,50000,5,null,null,null,false)`);
+ reqId=(await db.query(`select id from discount_requests where offer_id=${offerA} and status='pending' order by id desc limit 1`)).rows[0].id;
+});
+// 3. a user without discounts.approve cannot approve.
+await as(buyer,()=>deny(`select approve_discount_request(${reqId})`));
+// 4. the request's own seller cannot approve merely by ownership.
+await as(seller,()=>deny(`select approve_discount_request(${reqId})`));
+// 2. an operator granted discounts.approve (not Super Admin) can approve.
+await as(operator,async()=>{
+ await db.exec(`select approve_discount_request(${reqId})`);passed++;
+ // 5. valid approval updates the live discount correctly.
+ await check(`select discount_price from product_sellers where id=${offerA}`,50000);
+ // 6. the correct request is marked approved with trusted actor/time.
+ await check(`select status from discount_requests where id=${reqId}`,'approved');
+ await check(`select (decided_by='${operator}')::boolean from discount_requests where id=${reqId}`,true);
+ await check(`select (decided_at is not null)::boolean from discount_requests where id=${reqId}`,true);
+ // 12. an already-decided request cannot be decided again.
+ await deny(`select approve_discount_request(${reqId})`);
+ await deny(`select reject_discount_request(${reqId})`);
+});
+// 7. approval created an explicit audit log entry.
+await check(`select count(*)::int from admin_audit_log where action='approve_discount_request' and target_id='${reqId}' and actor_id='${operator}'`,1);
+
+let reqId2;
+await as(seller,async()=>{
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,40000,5,null,null,null,false)`);
+ reqId2=(await db.query(`select id from discount_requests where offer_id=${offerA} and status='pending' order by id desc limit 1`)).rows[0].id;
+});
+// 1. Super Admin can decide requests too (here: reject).
+await as(other,async()=>{
+ await db.exec(`select reject_discount_request(${reqId2},'too aggressive')`);passed++;
+ // 8. rejection leaves the live Offer unchanged.
+ await check(`select discount_price from product_sellers where id=${offerA}`,50000);
+ // 9. the request is marked rejected with trusted actor/time.
+ await check(`select status from discount_requests where id=${reqId2}`,'rejected');
+ await check(`select (decided_by='${other}')::boolean from discount_requests where id=${reqId2}`,true);
+ await check(`select (decided_at is not null)::boolean from discount_requests where id=${reqId2}`,true);
+});
+// 10. rejection created an explicit audit log entry.
+await check(`select count(*)::int from admin_audit_log where action='reject_discount_request' and target_id='${reqId2}' and actor_id='${other}' and reason='too aggressive'`,1);
+// 11. no cross-Offer bleed: an unrelated Offer is untouched by any decision above.
+const offerBId=(await db.query(`select id from product_sellers where product_id=${pB} and seller_id='${seller}'`)).rows[0].id;
+await check(`select discount_price from product_sellers where id=${offerBId}`,null);
+
+// 13. a base-price snapshot mismatch blocks approval atomically; the request stays pending, live Offer untouched.
+let reqId3;
+await as(seller,async()=>{
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,45000,5,null,null,null,false)`);
+ reqId3=(await db.query(`select id from discount_requests where offer_id=${offerA} and status='pending' order by id desc limit 1`)).rows[0].id;
+});
+// Simulate the base price moving after the request was filed but before it was decided.
+await db.exec(`update product_sellers set price=120000 where id=${offerA}`);
+await as(operator,()=>deny(`select approve_discount_request(${reqId3})`));
+await check(`select price from product_sellers where id=${offerA}`,120000);
+await check(`select discount_price from product_sellers where id=${offerA}`,50000);
+await check(`select status from discount_requests where id=${reqId3}`,'pending');
+await db.exec(`update product_sellers set price=100000 where id=${offerA}`);
+await as(other,async()=>{ await db.exec(`select reject_discount_request(${reqId3})`);passed++; });
+
+// 14. an invalid requested discount can never be persisted, so it can never reach approval/live
+// (table CHECK constraint, exercised directly -- independent of the grant-based denial in 18).
+await deny(`insert into discount_requests(offer_id,seller_id,base_price_snapshot,requested_discount_price) values(${offerA},'${seller}',100000,150000)`);
+
+// 15. approval never re-derives/hardcodes the threshold: it applies exactly the requested value
+// regardless of the CURRENT configured threshold at decision time.
+let reqId4;
+await as(seller,async()=>{
+ await db.exec(`select public.save_offer(${pA},${offerA},100000,42000,5,null,null,null,false)`);
+ reqId4=(await db.query(`select id from discount_requests where offer_id=${offerA} and status='pending' order by id desc limit 1`)).rows[0].id;
+});
+await db.exec('update marketplace_settings set seller_autonomous_discount_max_percent=5 where id=1');
+await as(operator,async()=>{ await db.exec(`select approve_discount_request(${reqId4})`);passed++; });
+await check(`select discount_price from product_sellers where id=${offerA}`,42000);
+await db.exec('update marketplace_settings set seller_autonomous_discount_max_percent=35 where id=1');
+
+// 16. existing <=threshold seller behavior remains intact after adding approve/reject.
+// 17. the locked combined base-price-change + above-threshold ask on an EXISTING Offer remains rejected.
+const pC=(await db.query("insert into products(name,slug) values('Discount Part C','discount-part-c') returning id")).rows[0].id;
+await as(seller,async()=>{
+ const offerC=(await db.query(`select public.save_offer(${pC},null,50000,40000,3,null,null,null,false)`)).rows[0].save_offer;
+ await check(`select discount_price from product_sellers where id=${offerC}`,40000);
+ await check(`select count(*)::int from discount_requests where offer_id=${offerC}`,0);
+ await deny(`select public.save_offer(${pA},${offerA},130000,50000,5,null,null,null,false)`);
+ await check(`select price from product_sellers where id=${offerA}`,100000);
+});
+
+// 18. direct client writes cannot bypass the decision RPCs, even for a caller who holds
+// discounts.approve or is Super Admin -- only the RPCs (owned by the table owner) may write.
+await as(operator,async()=>{
+ await deny(`update discount_requests set status='approved' where id=${reqId2}`);
+ await deny(`update product_sellers set discount_price=1 where id=${offerA}`);
+ await deny(`insert into discount_requests(offer_id,seller_id,base_price_snapshot,requested_discount_price,status,decided_by,decided_at) values(${offerA},'${seller}',100000,1,'approved','${operator}',now())`);
+});
+await as(other,async()=>{
+ await deny(`update discount_requests set status='rejected' where id=${reqId2}`);
+ await deny(`update product_sellers set discount_price=1 where id=${offerA}`);
+});
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);
