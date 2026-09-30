@@ -40,7 +40,13 @@ The baseline migration reconstructs an empty application schema from known colum
 
 Run `npm run test:security`, `npm run typecheck`, `npm run lint`, and `npm run build`.
 
-The security suite uses embedded PostgreSQL (PGlite) with minimal Auth/Storage stubs. It exercises migrations against an empty schema and a permissive existing schema, actual grants/RLS, forgery and ownership attacks, coupons, idempotency, fulfillment isolation, cancellation and forced transaction rollback. HTTP tests exercise origin/auth/body checks and error sanitization with mocked Supabase transport. Last-unit competition uses PGlite's serialized connection; it is not an independent-session PostgreSQL concurrency test.
+The security suite uses embedded PostgreSQL (PGlite) with minimal Auth/Storage stubs. It exercises migrations against an empty schema and a permissive existing schema, actual grants/RLS, forgery and ownership attacks, coupons, idempotency, fulfillment isolation, cancellation and forced transaction rollback. HTTP tests exercise origin/auth/body checks and error sanitization with mocked Supabase transport. PGlite's serialized connection is not a concurrent-session test; use the separate local PostgreSQL 17 test below for that gate.
+
+### Gate 1: independent PostgreSQL concurrency
+
+Run `pwsh -NoProfile -File tests/postgres-concurrency.ps1` against an empty, disposable local PostgreSQL 17 database named `mycar_gate1`, after applying the migrations with local Auth/Storage test stubs. The test connects only to `127.0.0.1`, expects the local `mycar_gate1` role and configured pgpass, and prints no credentials. It refuses the wrong database/server and checks that its fixture tables are empty. It uses separate `psql` processes and verifies concurrent orders, last-stock protection (including two observed lock waiters), global and per-user coupon caps, idempotent replay/conflict, opposite item lock order, and once-only stock restoration under concurrent cancellation.
+
+Validated on 2026-09-29 with PostgreSQL 17.11: all scenarios passed using separate `psql` processes; two backend sessions were observed waiting on the same Offer row lock, and the last-unit race committed exactly one order. This validates local PostgreSQL concurrency only; hosted configuration and staging flows remain separate rollout gates.
 
 Before hosted rollout, in a staging copy:
 
