@@ -1,0 +1,17 @@
+{
+  "version":1,
+  "phase":"department-base-checkpoint",
+  "productPhase":"phase-4-admin-panel-completion (not advanced)",
+  "status":"pilot-completed-integration-pending",
+  "issue":"https://github.com/siyartarash-creator/my-car/issues/1",
+  "branch":"department/base",
+  "base":"87c388f801388a02306ca54b8085737794174567",
+  "pilotCommit":"ce82656",
+  "report":".department/reports/pilot-ignore-supabase-temp-v2.completed.json",
+  "failedAttempt":".department/reports/pilot-ignore-supabase-temp.failed.json",
+  "newCostUsd":0,
+  "mergeAuthorized":false,
+  "deployAuthorized":false,
+  "automaticAiWorkersEnabled":false,
+  "requiredCiEnforced":false
+}

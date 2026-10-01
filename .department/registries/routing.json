@@ -1,0 +1,4 @@
+{
+  "repository-hygiene": {"risk":"low","worker":"local-hygiene","scope":[".gitignore"],"gates":["scope","secret-scan","whitespace","supabase-temp-ignore"]},
+  "default": {"action":"blocked","reason":"No admitted route. Auth, RLS, payments, migrations, staging and Production are outside Base v0."}
+}

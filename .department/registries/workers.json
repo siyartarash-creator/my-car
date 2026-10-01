@@ -1,0 +1,5 @@
+{
+  "local-hygiene": {"adapter":"builtin-ignore-supabase-temp","enabled":true,"model":"none","permissions":["write:.gitignore"],"maxAttempts":1,"newCostUsd":0},
+  "claude": {"adapter":"claude-cli","enabled":false,"model":"session-selected","permissions":[],"maxAttempts":1,"newCostUsd":0,"reason":"Requires verified runtime isolation and subscription-only billing; never falls back to API"},
+  "codex": {"adapter":"codex-cli","enabled":false,"model":"session-selected","permissions":[],"maxAttempts":1,"newCostUsd":0,"reason":"Requires verified runtime isolation and subscription-only billing; current supervised Codex session built this base"}
+}

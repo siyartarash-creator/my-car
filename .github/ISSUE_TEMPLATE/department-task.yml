@@ -1,0 +1,23 @@
+name: Department task
+description: Internal PM intake; Mehdi receives plain-language decisions and delivery reports.
+title: "[Department] "
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective and acceptance
+      description: Untrusted task data. PM maps this to a validated repository task contract.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope, risk, budget and checkpoint
+      description: Exact allowed paths; no Production, staging, secrets or new cost in Base v0.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: State and evidence
+      value: "State: queued\nTask contract:\nBase commit:\nReport:\nDelivery branch/PR:\nOwner decision (only if needed):"

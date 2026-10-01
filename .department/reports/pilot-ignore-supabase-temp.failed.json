@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "taskId": "pilot-ignore-supabase-temp",
+  "status": "failed",
+  "baseCommit": "604395a367880f8c6f2e2a7645048ac472e899d4",
+  "worker": "local-hygiene",
+  "attempts": 1,
+  "newCostUsd": 0,
+  "changedFiles": [
+    ".gitignore"
+  ],
+  "gates": [
+    {
+      "id": "scope",
+      "passed": true
+    },
+    {
+      "id": "secret-scan",
+      "passed": true
+    },
+    {
+      "id": "whitespace",
+      "passed": false
+    }
+  ],
+  "events": [
+    {
+      "from": "queued",
+      "to": "validated",
+      "at": "2026-10-01T17:19:04.805Z"
+    },
+    {
+      "from": "validated",
+      "to": "running",
+      "at": "2026-10-01T17:19:04.811Z"
+    },
+    {
+      "from": "running",
+      "to": "checking",
+      "at": "2026-10-01T17:19:04.815Z"
+    },
+    {
+      "from": "checking",
+      "to": "failed",
+      "at": "2026-10-01T17:19:05.058Z"
+    }
+  ],
+  "summary": "git-check-failed"
+}

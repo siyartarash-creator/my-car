@@ -1,0 +1,5 @@
+{
+  "node": {"source":"existing-runtime","major":22,"network":false,"newCostUsd":0},
+  "git": {"source":"existing-runtime","operations":["rev-parse","status","diff","ls-files","check-ignore"],"network":false,"newCostUsd":0},
+  "admission": {"newDependencies":false,"newCredentials":false,"newNetworkDestinations":false,"paidTools":false,"rule":"New tools need a pinned version, established maintainer, compatible license and enforced sandbox; exceptions go to owner"}
+}
