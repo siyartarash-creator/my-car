@@ -151,3 +151,12 @@ test('dangling directory links are also rejected', t => {
   fs.symlinkSync(path.join(root,'missing'), path.join(root,'dangling'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => safePath(root,'dangling/new-file'), /symlink-denied/);
 });
+test('Windows CRLF checkout passes normalized whitespace and scope gates', t => {
+  const root = fixture(t);
+  const file = path.join(root,'.gitignore');
+  fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace(/\n/g,'\r\n'));
+  const report = run(root,task);
+  assert.equal(report.status,'completed');
+  assert.deepEqual(report.changedFiles,['.gitignore']);
+  assert.ok(fs.readFileSync(file,'utf8').includes('/supabase/.temp/\r\n'));
+});

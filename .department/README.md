@@ -16,7 +16,7 @@ From a clean `department/<name>` branch at the repository root:
 ```sh
 node .department/cli.mjs validate
 node --test .department/tests/department.test.mjs
-node .department/cli.mjs run pilot-ignore-supabase-temp
+node .department/cli.mjs run pilot-ignore-supabase-temp-v2
 ```
 
 The runner reads only admitted context files, records their hashes and the base

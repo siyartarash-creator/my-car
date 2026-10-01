@@ -56,7 +56,7 @@ export function scan(text) {
 export function git(root, args, allowedExit = [0], timeout = 10000) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE)$/i.test(k)));
   Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null' });
-  const result = spawnSync('git', ['-c','core.fsmonitor=false', ...args], { cwd: root, env, encoding:'utf8', timeout, maxBuffer:1024 * 1024, windowsHide:true, shell:false });
+  const result = spawnSync('git', ['-c','core.fsmonitor=false','-c','core.autocrlf=input', ...args], { cwd: root, env, encoding:'utf8', timeout, maxBuffer:1024 * 1024, windowsHide:true, shell:false });
   requireThat(!result.error && allowedExit.includes(result.status), 'git-check-failed');
   return { text:result.stdout, status:result.status };
 }
