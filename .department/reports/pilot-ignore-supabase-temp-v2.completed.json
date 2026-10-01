@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "taskId": "pilot-ignore-supabase-temp-v2",
+  "status": "completed",
+  "baseCommit": "7e30b41634996986170b35043af722b5b71eb1b9",
+  "worker": "local-hygiene",
+  "attempts": 1,
+  "newCostUsd": 0,
+  "changedFiles": [
+    ".gitignore"
+  ],
+  "gates": [
+    {
+      "id": "scope",
+      "passed": true
+    },
+    {
+      "id": "secret-scan",
+      "passed": true
+    },
+    {
+      "id": "whitespace",
+      "passed": true
+    },
+    {
+      "id": "supabase-temp-ignore",
+      "passed": true
+    }
+  ],
+  "events": [
+    {
+      "from": "queued",
+      "to": "validated",
+      "at": "2026-10-01T17:22:14.666Z"
+    },
+    {
+      "from": "validated",
+      "to": "running",
+      "at": "2026-10-01T17:22:14.670Z"
+    },
+    {
+      "from": "running",
+      "to": "checking",
+      "at": "2026-10-01T17:22:14.673Z"
+    },
+    {
+      "from": "checking",
+      "to": "completed",
+      "at": "2026-10-01T17:22:15.068Z"
+    }
+  ],
+  "summary": "Supabase CLI temporary metadata is ignored; migrations remain tracked. No network, database, deployment or new spend."
+}
