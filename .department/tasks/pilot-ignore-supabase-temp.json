@@ -1,0 +1,11 @@
+{
+  "version":1,
+  "id":"pilot-ignore-supabase-temp",
+  "kind":"repository-hygiene",
+  "objective":"Keep Supabase CLI generated local metadata out of My Car commits.",
+  "acceptance":["Supabase temporary files are ignored","Migration SQL remains eligible for version control","Only .gitignore changes","No database, network, credential, package-install or deployment operation"],
+  "scope":[".gitignore"],
+  "context":["AGENTS.md","CLAUDE.md",".gitignore"],
+  "budget":{"newCostUsd":0,"maxAttempts":1,"timeoutSeconds":30},
+  "permissions":{"production":false,"staging":false,"network":false,"secrets":false,"push":false,"merge":false,"deploy":false}
+}

@@ -1,0 +1,13 @@
+{
+  "type":"object","additionalProperties":false,
+  "required":["version","id","kind","objective","acceptance","scope","context","budget","permissions"],
+  "properties": {
+    "version":{"const":1},"id":{"type":"string","pattern":"^[a-z][a-z0-9-]{2,63}$"},
+    "kind":{"enum":["repository-hygiene"]},"objective":{"type":"string","minLength":1,"maxLength":2000},
+    "acceptance":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":500}},
+    "scope":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":200}},
+    "context":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":200}},
+    "budget":{"type":"object","additionalProperties":false,"required":["newCostUsd","maxAttempts","timeoutSeconds"],"properties":{"newCostUsd":{"const":0},"maxAttempts":{"const":1},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":60}}},
+    "permissions":{"type":"object","additionalProperties":false,"required":["production","staging","network","secrets","push","merge","deploy"],"properties":{"production":{"const":false},"staging":{"const":false},"network":{"const":false},"secrets":{"const":false},"push":{"const":false},"merge":{"const":false},"deploy":{"const":false}}}
+  }
+}

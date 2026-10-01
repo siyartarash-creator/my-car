@@ -1,0 +1,6 @@
+{
+  "scope": {"required":true,"implementation":"changed-path-allowlist"},
+  "secret-scan": {"required":true,"implementation":"changed-text-and-context-scan"},
+  "whitespace": {"required":true,"implementation":"git-diff-check"},
+  "supabase-temp-ignore": {"required":true,"implementation":"git-check-ignore"}
+}

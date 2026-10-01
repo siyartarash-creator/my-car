@@ -1,0 +1,10 @@
+{
+  "type":"object","additionalProperties":false,"required":["version","taskId","status","baseCommit","worker","attempts","newCostUsd","changedFiles","gates","events","summary"],
+  "properties":{
+    "version":{"const":1},"taskId":{"type":"string"},"status":{"enum":["completed","failed","blocked"]},"baseCommit":{"type":"string","pattern":"^[a-f0-9]{40}$"},
+    "worker":{"type":"string"},"attempts":{"type":"integer","minimum":0,"maximum":1},"newCostUsd":{"const":0},
+    "changedFiles":{"type":"array","items":{"type":"string"}},"summary":{"type":"string","maxLength":2000},
+    "gates":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}}},
+    "events":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["from","to","at"],"properties":{"from":{"type":"string"},"to":{"type":"string"},"at":{"type":"string"}}}}
+  }
+}
