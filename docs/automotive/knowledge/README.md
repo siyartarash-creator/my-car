@@ -30,8 +30,12 @@ Every optional case field uses `Maybe<T>` (`{ known: true, value } | { known: fa
 
 ## Natural narration boundary
 
-`narrationProvider.ts#CaseDraftProvider` is the seam a future AI provider implements to turn free text ("Peugeot 206 cranked normally but would not start...") into a `StructuredCaseDraft`. No external AI call exists in this repository; `TEST_ONLY_mockCaseDraftProvider` is a deterministic, clearly-marked stand-in for tests only, and its output is always `isFixture: true` -- which independently blocks it from ever reaching `reviewStatus: "published"`.
+`narrationProvider.ts#CaseDraftProvider` is the seam a future AI provider implements to turn free text ("Peugeot 206 cranked normally but would not start...") into a `StructuredCaseDraft`. No external AI call exists in this repository; the only mock implementation lives under `tests/automotive/knowledge/testSupport/mockCaseDraftProvider.ts` (test-only, never imported from `lib/` or `components/`) and its output is always `isFixture: true` -- which independently blocks it from ever reaching `reviewStatus: "published"`. The production default, `noProviderConfigured`, throws rather than fabricating a draft.
 
 ## Human review stays mandatory
 
 Exactly as in Milestone 1: `reviewStatus: "published"` requires `reviewedByProfileId` and `reviewedAt` to both be known, and `isFixture` to be `false`. No code path in this worker's scope sets both of those automatically.
+
+## Mobile Alpha additions (Worker B)
+
+`reviewWorkflow.ts`, `draftBuilder.ts`, `attachments.ts`, and the `components/automotive/` UI pieces build an explicit Draft -> Needs Review -> Approve/Reject workflow and an attachment-metadata contract on top of this layer. See [MOBILE_ALPHA_TEACH_REVIEW.md](./MOBILE_ALPHA_TEACH_REVIEW.md) for the full integration contract.
