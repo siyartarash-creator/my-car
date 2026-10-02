@@ -33,6 +33,19 @@ const KNOWN_ACTIONS = [
   "delete_product",
 ] as const;
 const TARGET_TABLES = ["operator_permissions", "discount_requests", "product_sellers", "product_requests", "coupons", "products"] as const;
+const PAGE_SIZE = 50;
+
+function pageHref(params: { actor?: string; action?: string; target_table?: string; from?: string; to?: string }, page: number): string {
+  const qp = new URLSearchParams();
+  if (params.actor) qp.set("actor", params.actor);
+  if (params.action) qp.set("action", params.action);
+  if (params.target_table) qp.set("target_table", params.target_table);
+  if (params.from) qp.set("from", params.from);
+  if (params.to) qp.set("to", params.to);
+  if (page > 1) qp.set("page", String(page));
+  const qs = qp.toString();
+  return qs ? `/admin/audit?${qs}` : "/admin/audit";
+}
 
 // Read-only Admin audit surface over admin_audit_log (Checkpoint C). No
 // mutation UI at all -- the table is already append-only with no
@@ -45,10 +58,13 @@ const TARGET_TABLES = ["operator_permissions", "discount_requests", "product_sel
 export default async function AdminAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ actor?: string; action?: string; target_table?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ actor?: string; action?: string; target_table?: string; from?: string; to?: string; page?: string }>;
 }) {
   const { client } = await requireSuperAdmin();
   const params = await searchParams;
+  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
 
   const [{ data: admins }, { data: operatorGrants }] = await Promise.all([
     client.from("profiles").select("id,name").eq("is_admin", true),
@@ -63,9 +79,12 @@ export default async function AdminAuditPage({
 
   let query = client
     .from("admin_audit_log")
-    .select("id,actor_id,action,target_table,target_id,reason,metadata,created_at")
+    .select("id,actor_id,action,target_table,target_id,reason,metadata,created_at", { count: "exact" })
     .order("created_at", { ascending: false })
-    .limit(200);
+    // created_at alone is not unique; a secondary order on id (unique,
+    // stable) keeps rows from shifting or repeating across pages.
+    .order("id", { ascending: false })
+    .range(from, to);
   if (params.actor) query = query.eq("actor_id", params.actor);
   if (params.action) query = query.eq("action", params.action);
   if (params.target_table) query = query.eq("target_table", params.target_table);
@@ -78,8 +97,9 @@ export default async function AdminAuditPage({
     }
   }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   const rows = (data ?? []) as LogRow[];
+  const totalPages = count != null ? Math.max(1, Math.ceil(count / PAGE_SIZE)) : page;
 
   return (
     <div>
@@ -130,6 +150,7 @@ export default async function AdminAuditPage({
       ) : rows.length === 0 ? (
         <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/60 p-12 text-center text-gray-400">رکوردی پیدا نشد.</div>
       ) : (
+        <>
         <div className="space-y-2">
           {rows.map((r) => (
             <div key={r.id} className="rounded-xl border border-[#39FF14]/20 bg-neutral-900/60 p-4">
@@ -152,6 +173,29 @@ export default async function AdminAuditPage({
             </div>
           ))}
         </div>
+
+        {totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-between gap-3">
+            {page > 1 ? (
+              <a href={pageHref(params, page - 1)} className="rounded-full border border-[#39FF14]/30 px-4 py-2 text-sm text-[#39FF14] transition hover:bg-[#39FF14]/10">
+                قبلی
+              </a>
+            ) : (
+              <span />
+            )}
+            <p className="text-xs text-gray-400">
+              صفحه {page.toLocaleString("fa-IR")} از {totalPages.toLocaleString("fa-IR")}
+            </p>
+            {page < totalPages ? (
+              <a href={pageHref(params, page + 1)} className="rounded-full border border-[#39FF14]/30 px-4 py-2 text-sm text-[#39FF14] transition hover:bg-[#39FF14]/10">
+                بعدی
+              </a>
+            ) : (
+              <span />
+            )}
+          </div>
+        )}
+        </>
       )}
     </div>
   );

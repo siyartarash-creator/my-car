@@ -434,7 +434,7 @@ export default function Home() {
               💡 قیمت‌ها به تومان است و ممکن است بر اساس منطقه و شرایط تغییر کند
             </p>
             <Link
-              href="/contact"
+              href="/shop"
               className="rounded-full border border-[#39FF14]/40 px-6 py-2.5 text-sm font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10 hover:shadow-[0_0_20px_rgba(57,255,20,0.3)]"
             >
               استعلام قیمت دقیق
