@@ -4,9 +4,11 @@
 
 **Owner and final authority:** Mehdi
 
-**Current verified state:** Phase 4 PASS; Phase 4.5 DONE
+**Current verified state:** Phase 4 PASS; Phase 4.5 DONE; Phase 5 technical
+result READY FOR OWNER PASS (Owner decision pending)
 
-**Next product phase:** Phase 5, planned and not started
+**Next product phase:** Phase 5 technical work complete; awaiting Owner
+PASS/BLOCKED decision before any further phase
 
 **Production launch:** not a current objective
 
@@ -114,7 +116,67 @@ The five accepted artifacts were independently reviewed where security-relevant 
 
 ## 6. Phase 5 — Store Completion
 
-**Status: PLANNED — NOT STARTED AND NOT AUTHORIZED BY PHASE 4.5 COMPLETION**
+**Status: technical result READY FOR OWNER PASS** (local verification,
+2026-10-02; branch `phase-5-store-completion`). Full evidence:
+`docs/phase-5-store-completion-gate.md`. Mehdi/Owner retains final
+PASS/BLOCKED authority; no subsequent phase is authorized by this result.
+
+### Actual completed capabilities
+
+- Admin order detail/line-item UI (`app/admin/orders/[id]/page.tsx`),
+  read-only, gated by the existing `orders.read` permission and the
+  existing `item_orders_read` RLS policy from Phase 4.5 — no new
+  migration, permission key, or RPC.
+- Real pagination on `/admin/orders` and `/admin/audit`, replacing their
+  fixed 100/200-row caps, preserving existing filters and stable ordering.
+- One dead-link fix on the public landing page (`/contact` → `/shop`).
+- Bounded end-to-end review of Buyer/Seller/Admin Store flows; every
+  discovered gap classified (see `docs/phase-5-store-completion-gate.md`
+  section 3) — no gap left undecided.
+- Payment-provider boundary and SMS/phone-verification boundary documented
+  from actual implementation evidence (no provider/SMS code added).
+- Concurrency verification requirement satisfied by reference: no Phase 5
+  change touches locking/stock/order-consistency code; the existing Gate 1
+  PostgreSQL suite already proportionally proves those properties and was
+  not invalidated.
+
+### Deferred gaps / accepted limitations
+
+- `/admin/offers`, `/admin/discount-requests` (200-row caps) and
+  `/admin/operators` (100-row cap, and its query scope spans all profiles)
+  — accepted/deferred; current seed/real volumes are far below each cap.
+- `/admin/coupons` has no row cap at all (inconsistent with other admin
+  lists) — accepted at current scale.
+- A dead UI button branch in seller orders tied to an unreachable
+  fulfillment status value — accepted, not a functional defect.
+- A pre-existing, unrelated `react-hooks/set-state-in-effect` lint finding
+  in `app/page.tsx` — deferred, not introduced or touched by Phase 5.
+
+### Test evidence
+
+`npm run typecheck`, `npm run build`, scoped lint on touched files,
+`node tests/database-security.mjs` (302×2 security/transaction assertions
++ 15×2 HTTP-to-PostgreSQL assertions, no regression from the Phase 4.5
+baseline), `node tests/write-boundary.mjs` (31 assertions),
+`npm run test:admin-seed` (17 cross-checks + 4 reset checks), and
+`node tests/admin-local-functional.mjs` (186 assertions, up from 172 at
+Phase 4.5, with new coverage for order-detail authorization, invalid-id
+handling, and pagination) all PASS. An independent reviewer examined the
+new/changed authorization surface (order detail page + pagination) and
+returned PASS with no findings.
+
+### Known technical debt entering any future phase
+
+Admin list caps on offers/discount-requests/operators/coupons remain
+fixed/inconsistent (accepted at current scale, revisit if volume grows);
+the landing-page `react-hooks/set-state-in-effect` lint finding remains
+unfixed (pre-existing, unrelated to Phase 5); data durability/backup
+capability for any future hosted environment remains **NOT VERIFIED —
+REQUIRES FUTURE HOSTED CHECK** (not a Phase 5 blocker).
+
+### Historical scope record (as authorized before execution)
+
+**Status at authorization: PLANNED — NOT STARTED AND NOT AUTHORIZED BY PHASE 4.5 COMPLETION**
 
 ### Objective and scope
 
@@ -235,7 +297,8 @@ Unless a verified dependency makes one necessary earlier, these remain deferred:
 - Phase 3: **DONE**
 - Phase 4: **PASS**
 - Phase 4.5: **DONE / PASS** — checkpoint `be654cf7be57a1e84628dcf63bee3f194f4895b8`
-- Phase 5: **PLANNED — NOT STARTED**
+- Phase 5: **technical result READY FOR OWNER PASS** — awaiting Owner
+  PASS/BLOCKED decision; see `docs/phase-5-store-completion-gate.md`
 - Real Payment: **DEFERRED**
 - Real SMS/OTP: **DEFERRED**
 - Production Readiness: **DEFERRED**
@@ -245,4 +308,8 @@ Unless a verified dependency makes one necessary earlier, these remain deferred:
 
 ## 13. Immediate authorized action
 
-Phase 4.5 is complete. Stop. Phase 5 remains NOT STARTED until Mehdi explicitly authorizes it.
+Phase 5's technical scope is complete and locally checkpointed on branch
+`phase-5-store-completion`; its result is READY FOR OWNER PASS, not a
+PASS. Stop. No further phase, track, or scope starts until Mehdi reviews
+`docs/phase-5-store-completion-gate.md` and records a PASS or BLOCKED
+decision.
