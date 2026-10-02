@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
     "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs",
-    "test:admin-seed": "node tests/seed-routine-dataset.mjs"
+    "test:admin-seed": "node tests/seed-routine-dataset.mjs",
+    "test:automotive": "node tests/automotive/diagnostic-contract.test.mjs && node tests/automotive/schema-security.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
