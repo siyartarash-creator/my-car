@@ -15,11 +15,15 @@ const qualityChecks = load("lib/automotive/knowledge/qualityChecks.ts", {
 const narrationProvider = load("lib/automotive/knowledge/narrationProvider.ts", {
   "./types": knowledgeTypes,
 });
+const mockProvider = load("tests/automotive/knowledge/testSupport/mockCaseDraftProvider.ts", {
+  "../../../../lib/automotive/knowledge/types": knowledgeTypes,
+  "../../../../lib/automotive/knowledge/narrationProvider": narrationProvider,
+});
 
 const { unknownField, knownField } = knowledgeTypes;
 const { validateCaseDraft } = draftContract;
 const { checkDraftQuality } = qualityChecks;
-const { TEST_ONLY_mockCaseDraftProvider } = narrationProvider;
+const { TEST_ONLY_mockCaseDraftProvider } = mockProvider;
 
 let passed = 0;
 function check(actual, expected, label) {

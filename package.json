@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs",
     "test:admin-seed": "node tests/seed-routine-dataset.mjs",
-    "test:automotive": "node tests/automotive/diagnostic-contract.test.mjs && node tests/automotive/evidence-claims.test.mjs && node tests/automotive/progressive-diagnosis.test.mjs && node tests/automotive/llm-provider-boundary.test.mjs && node tests/automotive/case-intake.test.mjs && node tests/automotive/knowledge/draft-contract.test.mjs && node tests/automotive/knowledge/to-case-intake.test.mjs && node tests/automotive/evaluation.test.mjs && node tests/automotive/schema-security.mjs"
+    "test:automotive": "node tests/automotive/diagnostic-contract.test.mjs && node tests/automotive/evidence-claims.test.mjs && node tests/automotive/progressive-diagnosis.test.mjs && node tests/automotive/llm-provider-boundary.test.mjs && node tests/automotive/case-intake.test.mjs && node tests/automotive/knowledge/draft-contract.test.mjs && node tests/automotive/knowledge/to-case-intake.test.mjs && node tests/automotive/knowledge/review-workflow.test.mjs && node tests/automotive/knowledge/attachments.test.mjs && node tests/automotive/knowledge/narration-provider-boundary.test.mjs && node tests/automotive/knowledge/submit-approved-draft.test.mjs && node tests/automotive/evaluation.test.mjs && node tests/automotive/schema-security.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

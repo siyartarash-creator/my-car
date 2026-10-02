@@ -89,24 +89,35 @@ See [MEHDI_CASE_TEMPLATE.md](./MEHDI_CASE_TEMPLATE.md) for the intake format.
 - **`types.ts`**: `StructuredCaseDraft` -- vehicle applicability, symptoms, mechanic observations, diagnostic tests, measured results, candidate causes, confirmed cause, repair/outcome, mechanic notes, provenance, confidence, risk, review state. Every optional field is `Maybe<T>` (`{ known: true, value } | { known: false }`) so an unknown fact is never fabricated. Two provenance axes are kept separate: `origin` (who/what produced *this draft record* -- `mechanic_authored` / `ai_structured` / `fixture`) vs. `provenance` (the `KnowledgeSourceType` it would carry once published). This is what keeps "AI structured Mehdi's words" distinguishable from "Mehdi typed this himself."
 - **`draftContract.ts#validateCaseDraft`**: hard invariants -- allowed enum values, minimum content, a fixture can never claim literal mechanic authorship, a confirmed cause must be one of the candidate causes and have diagnostic/measured support, and `reviewStatus: "published"` requires both review metadata and `isFixture: false`.
 - **`qualityChecks.ts#checkDraftQuality`**: non-blocking warnings (repair without outcome, a safety-sensitive keyword with a low risk classification, etc.).
-- **`narrationProvider.ts#CaseDraftProvider`**: the seam a future AI extractor implements to propose a draft from free-text narration ("Peugeot 206 cranked normally but would not start..."). No external AI call exists in this repository; `TEST_ONLY_mockCaseDraftProvider` is a deterministic test-only stand-in whose output is always `isFixture: true`, which independently blocks it from ever reaching `reviewStatus: "published"`.
+- **`narrationProvider.ts#CaseDraftProvider`**: the seam a future AI extractor implements to propose a draft from free-text narration ("Peugeot 206 cranked normally but would not start..."). No external AI call exists in this repository, and no mock implementation ships in production code either -- the production default, `noProviderConfigured`, refuses rather than fabricating a draft; the only deterministic stand-in lives under `tests/automotive/knowledge/testSupport/` and is never imported from `lib/` or `components/`.
 - **`toCaseIntake.ts#draftToCaseIntakeInput`**: the one adapter from a completed draft to `CaseIntakeDraftInput`. It never sets `confirmedRealCase` itself -- that must still be supplied explicitly by whoever is confirming the case, exactly as when calling `parseCaseIntakeDraft()` directly -- and it refuses (​`DraftNotReadyForIntakeError`) a fixture draft or one still missing a confirmed repair/outcome.
 
 Pipeline: Mehdi narration -> `CaseDraftProvider.proposeDraft()` -> `StructuredCaseDraft` -> `validateCaseDraft` + `checkDraftQuality` -> human review/confirmation -> `draftToCaseIntakeInput` -> `parseCaseIntakeDraft()` (unchanged) -> DB insert, draft status only.
 
-## 15. Current limitations
+## 15. Personal Mobile Alpha -- Teach / Review UI
+
+`app/automotive/teach/` is the first mounted, authenticated UI for the pipeline in §14: an admin-gated (`requireRole("admin")`, same pattern as `app/automotive/assistant`) page rendering `components/automotive/TeachAndReviewClient.tsx`, which orchestrates three portable components (`TeachCaseForm` -> `StructuredCaseReview` -> `AttachmentPicker`) that take plain props/callbacks and assume no routing/auth of their own.
+
+- **`lib/automotive/knowledge/reviewWorkflow.ts`**: explicit Draft -> Needs Review -> Approve/Reject/Edit state machine. `approveDraft()` requires an explicit reviewer id + timestamp, rejects fixtures and structurally invalid drafts, and never touches `origin`/`provenance`/`aiTransformed`. `editDraft()` always resets state to `"draft"` and clears prior review metadata, so an edited draft must be re-approved. `toReadyForIntakeResult()` is the only way to extract an intake-ready `StructuredCaseDraft`, reachable only from `"approved"` state.
+- **`lib/automotive/knowledge/draftBuilder.ts`**: `createEmptyDraft` (manual entry, everything unknown) and `fromProposedDraft` (merges a provider proposal without changing its provenance fields).
+- **`lib/automotive/knowledge/attachments.ts`**: metadata-only attachment contract (`AttachmentMetadata`, `validateAttachmentMetadata`, `buildAttachmentMetadata`) -- no binary upload, no storage, no OCR/vision. `AttachmentPicker.tsx` visibly labels this as metadata-only rather than faking an upload.
+- **`lib/automotive/knowledge/submitApprovedDraft.ts#submitApprovedDraftToIntake`**: the only place the full chain is wired to a real Supabase client -- `toReadyForIntakeResult` -> `draftToCaseIntakeInput` -> Core's own `parseCaseIntakeDraft()` (unchanged) -> `persistCaseIntake.ts#insertCaseIntakeDraft`, which inserts into the existing `automotive_case_intake` table under its existing RLS (`case_intake_write: author_profile_id = auth.uid()`). No migration, no new policy. The author/submitter profile id always comes from the server-side authenticated session (`app/automotive/teach/actions.ts`), never from client-supplied state.
+
+## 16. Current limitations
 
 - No real knowledge entries exist yet; only `isFixture: true` test data exercises the pipeline (see `tests/automotive/fixtures.mjs`).
 - Retrieval is keyword-substring matching, not semantic -- see trigger criteria above.
 - No real LLM wired up (`$0` external spend); narration is template-based; the structured provider boundary exists but has no real implementation yet.
 - Progressive diagnosis narrows only on explicit `relatedToEntryId` + `result` observations supplied by the caller -- it does not yet infer which entry an unstructured observation is "about".
-- `app/automotive/assistant` is internal-only (admin-gated), not linked from public navigation.
+- `app/automotive/assistant` and `app/automotive/teach` are internal-only (admin-gated), not linked from public navigation.
 - No real `CaseDraftProvider` implementation exists yet -- only the test-only mock. No real `StructuredCaseDraft` has been authored yet; only fixtures exercise the validation/quality-check path.
+- No attachment upload/storage, OCR, or vision exists -- `AttachmentPicker` records metadata only.
+- No PWA/installability infrastructure exists in the repository.
 
-## 16. Future OBD/CAN reference (not implemented)
+## 17. Future OBD/CAN reference (not implemented)
 
 [OBDb](https://github.com/OBDb) was identified as a future reference for per-vehicle OBD/CAN/UDS signal definitions, licensed CC-BY-SA-4.0. It is **not** ingested in Milestone 2 and no OBD/ELM327/CAN infrastructure exists. When OBD data or live-vehicle tooling is eventually added, any OBDb-derived data carries its CC-BY-SA-4.0 attribution requirement explicitly, and any tool capability should be read-only-by-construction (the `obd-mcp-server` principle) -- blocked by capability architecture, not by a prompt instruction. The current contracts (`DiagnosticQuery`, `StructuredReasoningRequest`) assume no action-execution capability, so adding a read-only tool later does not require re-architecting the safety boundary.
 
-## 17. Parallel-development boundaries
+## 18. Parallel-development boundaries
 
 Track B owns `lib/automotive/`, `app/automotive/`, `tests/automotive/`, and `docs/automotive/` exclusively. It does not modify: Store order flows, checkout, cart, products, offers, coupons, fulfillment, Store admin pages, `product_compatibility`, or any existing Store RLS policy. It references `public.profiles(id)` for ownership but does not alter the profiles table or its triggers. The automotive schema now lives in `supabase/migrations/202610021000_automotive_foundation.sql` (reconciled after Store Phase 5 completed; Phase 5's last migration, `202610020001_admin_order_item_read.sql`, sits before it in sequence with no timestamp collision).
