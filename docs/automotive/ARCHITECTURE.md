@@ -1,4 +1,4 @@
-# Automotive Intelligence -- V1 Architecture (Track B, Milestone 1)
+# Automotive Intelligence -- V1 Architecture (Track B, Milestone 1 + 2)
 
 Status: internal, read-only prototype foundation. No public launch, no Store integration, no autonomous actions. See [parallel-development boundaries](#parallel-development-boundaries) for what this track may and may not touch.
 
@@ -13,7 +13,7 @@ Relational PostgreSQL + structured/filterable retrieval. No vector database, no 
 
 ## 2. Minimal vehicle domain
 
-`vehicles` (`profile_id`, `make`, `model`, `year`, timestamps). No VIN -- no concrete need yet. Ownership always derives from `auth.uid()` via RLS (`profile_id = auth.uid() or private.is_admin()`), never a client-supplied value. See `supabase/automotive-pending/202610021000_automotive_foundation.sql`.
+`vehicles` (`profile_id`, `make`, `model`, `year`, timestamps). No VIN -- no concrete need yet. Ownership always derives from `auth.uid()` via RLS (`profile_id = auth.uid() or private.is_admin()`), never a client-supplied value. See `supabase/migrations/202610021000_automotive_foundation.sql`.
 
 ## 3. Knowledge contract
 
@@ -58,14 +58,42 @@ Every finding carries its `entryId` for citation. The assistant never claims uns
 
 See [MEHDI_CASE_TEMPLATE.md](./MEHDI_CASE_TEMPLATE.md) for the intake format.
 
-## 8. Current limitations
+## 8. Milestone 2 -- evidence model
 
-- Migration is PREPARED, not applied (see status in the milestone report) -- pending reconciliation with concurrent Phase 5 migrations.
+`lib/automotive/evidence.ts` defines `EvidenceItem` (id, `EvidenceType`, source/reference, content, provenance, confidence, risk context) and `EvidenceIndex`, a lookup used to validate that a claim only cites evidence that actually exists in the current response. `EvidenceType` covers `knowledge_entry`, `mechanic_observation`, `user_observation`, `measured_value`, and `diagnostic_test_result`. This is TypeScript-only -- no new table was added; knowledge-entry evidence is derived from `automotive_knowledge_entries`, observation evidence from caller-supplied input for a diagnosis turn. This follows the DiagForge-influenced principle noted in the milestone brief (deterministic evidence analysis before reasoning), adapted to this stack -- no DiagForge code was used.
+
+## 9. Milestone 2 -- claim/evidence contract
+
+`lib/automotive/claims.ts` defines `ClaimType` (`FACT`, `OBSERVATION`, `HYPOTHESIS`, `RECOMMENDED_NEXT_CHECK`, `SAFETY_NOTICE`, `INSUFFICIENT_EVIDENCE`) and `validateClaims()`. `FACT` is reserved for what a knowledge entry literally documents; a possible cause applied to the current vehicle is always emitted as `HYPOTHESIS`, never `FACT` -- a causal/diagnostic claim never masquerades as retrieved fact. `FACT` and `SAFETY_NOTICE` claims must cite at least one evidence item that exists in the response, and `FACT` specifically must cite `knowledge_entry` evidence; unknown evidence IDs throw `ClaimValidationError`. `runDiagnosticQuery` builds and validates its own claims before returning (`diagnosticContract.ts`), so `DiagnosticResponse.claims`/`.evidence` are always self-consistent.
+
+## 10. Milestone 2 -- progressive diagnosis
+
+`DiagnosticQuery.observations` accepts caller-supplied `ObservationInput`s (never fabricated by the system) tied to a specific entry via `relatedToEntryId` with `result: "confirmed" | "ruled_out"`. `runDiagnosticQuery` narrows candidates accordingly: a ruled-out entry drops from the findings, a confirmed entry narrows the result to just that finding and stops re-asking about the check it already answered. The system still never declares a single cause on the first turn when more than one candidate is retrieved -- it asks for the discriminating check first (see `tests/automotive/progressive-diagnosis.test.mjs`).
+
+## 11. Milestone 2 -- LLM provider boundary (structured)
+
+`lib/automotive/llmProvider.ts` adds `buildStructuredRequest()` (normalizes question, vehicle context, evidence, and safety constraints for a future provider) and `validateStructuredResult()`, which independently re-validates a provider's returned claims against the evidence it was actually given -- never trusting well-formed JSON on its own. A claim citing nonexistent evidence, or misclassified as `FACT` without retrieved backing, is dropped; malformed output is rejected outright and the caller falls back to the deterministic `mockNarrationProvider`. No tool/action-execution capability is granted through this contract (read-only-by-construction, per the `obd-mcp-server` principle noted in the brief -- not implemented, only assumed as a future constraint). Still `$0` external spend; no real provider is wired up.
+
+## 12. Milestone 2 -- Mehdi real-knowledge intake
+
+`lib/automotive/caseIntake.ts#parseCaseIntakeDraft()` validates a submitted real case (observed/diagnosis/diagnostic test/resolution/uncertainty/safety notes, vehicle applicability) against length and shape constraints before it becomes an `automotive_case_intake` row. It requires `confirmedRealCase: true` explicitly -- there is no default -- so an AI-assisted drafting step can never silently submit its own example as a real mechanic case. Output status is always `draft`; `reviewed`/`published` remain human actions enforced by the DB (`published_case_has_entry`).
+
+## 13. Milestone 2 -- minimal evaluation foundation
+
+`lib/automotive/evaluation.ts` defines a small `EvalScenario`/`runScenario`/`runEvaluationSuite` contract: deterministic assertions over `runDiagnosticQuery` output -- retrieval correctness (expected cited entries), evidence grounding (every claim's evidence IDs exist in the response), next-diagnostic-step correctness, safety behavior (a risk level never carries action guidance), and vehicle-applicability handling. `tests/automotive/evaluation.test.mjs` runs it against clearly-marked fixture scenarios only -- never presented as real mechanic knowledge. No paid LLM judge; everything is a structural assertion.
+
+## 14. Current limitations
+
 - No real knowledge entries exist yet; only `isFixture: true` test data exercises the pipeline (see `tests/automotive/fixtures.mjs`).
 - Retrieval is keyword-substring matching, not semantic -- see trigger criteria above.
-- No real LLM wired up (`$0` external spend); narration is template-based.
+- No real LLM wired up (`$0` external spend); narration is template-based; the structured provider boundary exists but has no real implementation yet.
+- Progressive diagnosis narrows only on explicit `relatedToEntryId` + `result` observations supplied by the caller -- it does not yet infer which entry an unstructured observation is "about".
 - `app/automotive/assistant` is internal-only (admin-gated), not linked from public navigation.
 
-## 9. Parallel-development boundaries
+## 15. Future OBD/CAN reference (not implemented)
 
-Track B owns `lib/automotive/`, `app/automotive/`, `tests/automotive/`, `docs/automotive/`, and `supabase/automotive-pending/` exclusively. It does not modify: Store order flows, checkout, cart, products, offers, coupons, fulfillment, Store admin pages, `product_compatibility`, or any existing Store RLS policy. It references `public.profiles(id)` for ownership but does not alter the profiles table or its triggers. The schema file is kept outside `supabase/migrations/` until Phase 5's migration set is known, to avoid timestamp collisions; see that file's header comment for the reconciliation process.
+[OBDb](https://github.com/OBDb) was identified as a future reference for per-vehicle OBD/CAN/UDS signal definitions, licensed CC-BY-SA-4.0. It is **not** ingested in Milestone 2 and no OBD/ELM327/CAN infrastructure exists. When OBD data or live-vehicle tooling is eventually added, any OBDb-derived data carries its CC-BY-SA-4.0 attribution requirement explicitly, and any tool capability should be read-only-by-construction (the `obd-mcp-server` principle) -- blocked by capability architecture, not by a prompt instruction. The current contracts (`DiagnosticQuery`, `StructuredReasoningRequest`) assume no action-execution capability, so adding a read-only tool later does not require re-architecting the safety boundary.
+
+## 16. Parallel-development boundaries
+
+Track B owns `lib/automotive/`, `app/automotive/`, `tests/automotive/`, and `docs/automotive/` exclusively. It does not modify: Store order flows, checkout, cart, products, offers, coupons, fulfillment, Store admin pages, `product_compatibility`, or any existing Store RLS policy. It references `public.profiles(id)` for ownership but does not alter the profiles table or its triggers. The automotive schema now lives in `supabase/migrations/202610021000_automotive_foundation.sql` (reconciled after Store Phase 5 completed; Phase 5's last migration, `202610020001_admin_order_item_read.sql`, sits before it in sequence with no timestamp collision).

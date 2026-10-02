@@ -8,9 +8,13 @@ import { FIXTURE_ENTRIES } from "./fixtures.mjs";
 
 const safety = load("lib/automotive/safety.ts");
 const retrieval = load("lib/automotive/retrieval.ts", { "./types": {} });
+const evidence = load("lib/automotive/evidence.ts", { "./types": {} });
+const claims = load("lib/automotive/claims.ts", { "./evidence": evidence, "./types": {} });
 const contract = load("lib/automotive/diagnosticContract.ts", {
   "./retrieval": retrieval,
   "./safety": safety,
+  "./evidence": evidence,
+  "./claims": claims,
   "./types": {},
 });
 

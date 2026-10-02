@@ -1,8 +1,7 @@
 // Track B -- Supabase-backed fetcher for published automotive knowledge.
-// Read-only: the internal prototype never writes via this path. Will only
-// return rows once the pending migration
-// (supabase/automotive-pending/202610021000_automotive_foundation.sql) is
-// reconciled and applied -- until then the query fails because the table
+// Read-only: the internal prototype never writes via this path. Depends on
+// supabase/migrations/202610021000_automotive_foundation.sql being applied
+// to the target environment; until then the query fails because the table
 // doesn't exist, which callers must treat as "schema not ready", not a bug.
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";

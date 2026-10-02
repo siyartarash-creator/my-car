@@ -302,9 +302,13 @@ Unless a verified dependency makes one necessary earlier, these remain deferred:
 - Real Payment: **DEFERRED**
 - Real SMS/OTP: **DEFERRED**
 - Production Readiness: **DEFERRED**
-- Minimal Vehicle Domain Foundation: **PLANNED / NOT AUTHORIZED**
-- Automotive Foundation: **PLANNED / NOT AUTHORIZED**
-- Read-only Automotive AI Assistant: **PLANNED / NOT AUTHORIZED**
+- Minimal Vehicle Domain Foundation: **DONE** (Track B Milestone 1, branch `track-b-automotive-foundation`)
+- Automotive Foundation: **DONE** (Track B Milestone 1); migration reconciled into
+  `supabase/migrations/` as part of Milestone 2 Phase 5 integration
+- Read-only Automotive AI Assistant: **DONE (Milestone 1) / extended (Milestone 2)** --
+  evidence-constrained reasoning, claim/evidence validation, progressive
+  diagnosis, minimal evaluation foundation; see `docs/automotive/ARCHITECTURE.md`.
+  Still internal/read-only/non-public; no Store integration, no OBD, no paid LLM.
 
 ## 13. Immediate authorized action
 

@@ -1,6 +1,8 @@
 // Track B -- Automotive Intelligence domain types.
-// Mirrors supabase/automotive-pending/202610021000_automotive_foundation.sql.
-// Keep in sync with that file until the migration is reconciled and applied.
+// Mirrors supabase/migrations/202610021000_automotive_foundation.sql.
+// Keep in sync with that file.
+import type { EvidenceItem, ObservationInput } from "./evidence";
+import type { Claim } from "./claims";
 
 export type KnowledgeSourceType =
   | "manufacturer"
@@ -50,6 +52,9 @@ export interface DiagnosticQuery {
   /** Explicit, user-requested authorization to receive step-by-step action
    * text for requires_caution entries. Never implied by asking a question. */
   allowActionGuidance?: boolean;
+  /** Observations/test results supplied for this diagnosis turn (progressive
+   * diagnosis) -- never fabricated by the system, always caller-supplied. */
+  observations?: ObservationInput[];
 }
 
 export interface CitedFinding {
@@ -76,4 +81,10 @@ export interface DiagnosticResponse {
   findings: CitedFinding[];
   clarifyingQuestions: string[];
   notes: string[];
+  /** Every evidence item (retrieved knowledge entries + supplied observations)
+   * available for claims in this response to cite. */
+  evidence: EvidenceItem[];
+  /** Structured, evidence-traced claims -- see lib/automotive/claims.ts.
+   * Every claim here has already passed validateClaims() against `evidence`. */
+  claims: Claim[];
 }

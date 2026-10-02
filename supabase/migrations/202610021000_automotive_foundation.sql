@@ -1,13 +1,9 @@
--- PENDING RECONCILIATION -- NOT YET A LIVE MIGRATION.
--- This file lives outside supabase/migrations/ on purpose: Store Phase 5 is
--- running concurrently on another branch and may add migrations with
--- overlapping timestamps. Do not move/rename this file into
--- supabase/migrations/ until the Phase 5 migration set is known and the
--- timestamp below is confirmed non-colliding. Tests load this file directly
--- (see tests/automotive/schema-security.mjs) so the design is exercised
--- without consuming a real migration slot.
+-- Automotive foundation (Track B, Milestone 1/2). Reconciled into the
+-- canonical migration sequence after Store Phase 5 completed: Phase 5's
+-- last migration is 202610020001_admin_order_item_read.sql, so this
+-- timestamp (202610021000) is confirmed non-colliding and ordered after it.
 --
--- Track B owns this file exclusively. Do not edit from Store/Phase 5 work.
+-- Track B owns this file exclusively. Do not edit from Store work.
 
 -- vehicles: minimal owner-scoped vehicle domain. No VIN in V1 (no concrete
 -- need yet). Ownership always derives from auth.uid(), never a client value.

@@ -1,9 +1,7 @@
-// DB-level tests for the pending automotive schema: ownership boundary,
+// DB-level tests for the automotive schema: ownership boundary,
 // provenance integrity (published requires human review), and RLS read
-// scoping. Loads the official migrations plus the pending draft file
-// directly (it is intentionally outside supabase/migrations/ -- see that
-// file's header) so this exercises the real SQL without consuming a
-// migration slot ahead of Phase 5 reconciliation.
+// scoping. Loads the full canonical migration sequence (automotive
+// foundation included) directly against an in-memory PGlite instance.
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
@@ -24,7 +22,6 @@ grant select,insert,update,delete on storage.objects to anon,authenticated;`);
 for (const f of fs.readdirSync(path.join(base, "supabase/migrations")).sort()) {
   await db.exec(fs.readFileSync(path.join(base, "supabase/migrations", f), "utf8"));
 }
-await db.exec(fs.readFileSync(path.join(base, "supabase/automotive-pending/202610021000_automotive_foundation.sql"), "utf8"));
 
 const owner = "a0000000-0000-0000-0000-000000000001";
 const other = "a0000000-0000-0000-0000-000000000002";
