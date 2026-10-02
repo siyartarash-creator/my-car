@@ -50,6 +50,9 @@ check(validateOwnerExtra({ mileage: "99999999" }).mileage !== undefined, "out-of
 check(validateOwnerExtra({ vin: "12345678901234567" }).vin === undefined, "17-char VIN accepted");
 check(validateOwnerExtra({ vin: "short" }).vin !== undefined, "short VIN rejected");
 check(validateOwnerExtra({}).vin === undefined, "empty VIN is optional");
+check(validateOwnerExtra({ displayName: "ماشین شخصی" }).displayName === undefined, "short displayName accepted");
+check(validateOwnerExtra({ displayName: "ا".repeat(41) }).displayName !== undefined, "over-length displayName rejected");
+check(validateOwnerExtra({}).displayName === undefined, "empty displayName is optional");
 
 // seller/service extra
 check(validateSellerExtra({ experience: "15", warranty: "6" }).experience === undefined, "valid experience accepted");

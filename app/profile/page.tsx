@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { AvatarPicker } from "@/components/AvatarPicker";
+import { SingleImagePicker } from "@/components/SingleImagePicker";
 import {
   AddressForm,
   AddressData,
@@ -532,9 +533,28 @@ function ServiceExpertiseSelector({ value, onChange }: { value: string[]; onChan
 
 function OwnerForm({ carData, setCarData, addressData, setAddressData, contact, setContact, errors }: any) {
   const e = errors || {};
+  const v = carData || {};
   return (
     <>
       <CarSelector value={carData} onChange={setCarData} errors={e} />
+
+      <TextInput
+        label="نام دلخواه خودرو"
+        value={v.displayName || ""}
+        onChange={(val: string) => setCarData({ ...v, displayName: val })}
+        placeholder="مثلاً ماشین شخصی"
+        optional
+        maxLength={40}
+        error={e.displayName}
+      />
+
+      <SingleImagePicker
+        label="📷 عکس خودرو"
+        filePrefix="vehicle"
+        value={v.photoUrl}
+        onChange={(url) => setCarData({ ...v, photoUrl: url })}
+      />
+
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
@@ -598,6 +618,13 @@ function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, c
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس محل کار</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
+
+      <SingleImagePicker
+        label="📷 عکس تعمیرگاه/مجموعه"
+        filePrefix="business"
+        value={sellerData.photoUrl}
+        onChange={(url) => setSellerData({ ...sellerData, photoUrl: url })}
+      />
 
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
       <ContactInfo value={contact} onChange={setContact} errors={e} />
