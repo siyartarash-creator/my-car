@@ -150,6 +150,31 @@ await as(seller,async()=>{
  await deny("insert into product_requests(seller_id,product_name,status) values(auth.uid(),'Request','approved')");
  await deny("insert into products(name,slug) values('Unauthorized','unauthorized')");
 });
+// Seller Business Identity snapshot contract (202610021000): NEW offer/request
+// rows prefer profiles.data.seller.shopName over profiles.name, falling back
+// to the account name deterministically; historical rows stay untouched.
+const identityProductId=(await db.query("insert into products(name,slug) values('Part2','part2-identity') returning id")).rows[0].id;
+// Earlier fixtures above inserted product_sellers rows with explicit ids, bypassing
+// the sequence; sync it so save_offer's identity-column insert doesn't collide.
+await db.exec("select setval('product_sellers_id_seq',(select max(id) from product_sellers))");
+await as(seller,async()=>{
+ await db.exec("update profiles set data=data||jsonb_build_object('seller',jsonb_build_object('shopName','MY CAR Parts')) where id=auth.uid()");passed++;
+ const offerId=(await db.query(`select save_offer(${identityProductId},null,50000,null,5,null,null,null,false) as id`)).rows[0].id;
+ await check(`select seller_name from product_sellers where id=${offerId}`,'MY CAR Parts');
+ await db.exec("insert into product_requests(seller_id,product_name) values(auth.uid(),'New Request')");passed++;
+ await check("select seller_name from product_requests where product_name='New Request'",'MY CAR Parts');
+ // The request made before shopName was set must remain exactly as snapshotted.
+ await check("select seller_name from product_requests where product_name='Requested Part'",'Seller');
+});
+await as(other,async()=>{
+ // 'other' never set a shopName: new offers/requests must fall back to the account name, never blank.
+ const offerId=(await db.query(`select save_offer(${identityProductId},null,60000,null,5,null,null,null,false) as id`)).rows[0].id;
+ await check(`select seller_name from product_sellers where id=${offerId}`,'Other');
+});
+// Old/partial profiles.data shapes must resolve the same fallback without error.
+await check(`select coalesce(nullif(btrim(data->'seller'->>'shopName'),''),name) from (select '{"carExpertise":["x"]}'::jsonb as data,'Fallback Name'::text as name) t`,'Fallback Name');
+await check(`select coalesce(nullif(btrim(data->'seller'->>'shopName'),''),name) from (select '{"seller":{"shopName":"   "}}'::jsonb as data,'Fallback Name'::text as name) t`,'Fallback Name');
+await check(`select coalesce(nullif(btrim(data->'seller'->>'shopName'),''),name) from (select null::jsonb as data,'Fallback Name'::text as name) t`,'Fallback Name');
 await db.exec(`update profiles set is_admin=true where id='${other}'`);
 await as(other,async()=>{
  await check('select is_admin()',true);
