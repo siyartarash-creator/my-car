@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
+import { resolveSellerBusinessIdentity } from "@/lib/seller-identity";
 
 type MenuItem = {
   href: string;
@@ -20,6 +21,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
   const [checking, setChecking] = useState(true);
   const [isSeller, setIsSeller] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
+  const [businessName, setBusinessName] = useState<string | null>(null);
 
   useEffect(() => {
     const check = async () => {
@@ -30,7 +32,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
       }
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_type")
+        .select("user_type, name, phone1, phone2, about, social_links, data")
         .eq("id", userId)
         .single();
 
@@ -38,6 +40,8 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
         router.push("/");
         return;
       }
+
+      setBusinessName(resolveSellerBusinessIdentity(data).businessName);
 
       const { count } = await supabase
         .from("product_requests")
@@ -77,7 +81,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
             <Logo size={36} />
             <h1 className="text-xl font-bold text-[#39FF14]">ماشین من</h1>
             <span className="rounded-full border border-yellow-400/40 bg-yellow-400/10 px-2.5 py-0.5 text-[10px] text-yellow-400">
-              فروشنده
+              {businessName ?? "فروشنده"}
             </span>
           </Link>
           <Link

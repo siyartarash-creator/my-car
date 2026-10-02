@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "@/lib/cart-context";
+import { STORE_SELLER_FALLBACK_LABEL } from "@/lib/seller-identity";
 
 export type Product = {
   offer_id?: number; seller_id?: string; seller_name?: string;
@@ -51,7 +52,7 @@ export function ProductCard({ product }: ProductCardProps) {
       product_id: id,
       slug,
       name,
-      seller_name: product.seller_name || "فروشنده",
+      seller_name: product.seller_name || STORE_SELLER_FALLBACK_LABEL,
       price: displayPrice,
       image: imageSrc ?? "",
       stock,
@@ -182,7 +183,7 @@ export function ProductBuyPanel({ product, offer_id, seller_id, seller_name }: P
         slug,
         name,
         seller_id: seller_id,
-        seller_name: seller_name || "فروشگاه ماشین من",
+        seller_name: seller_name || STORE_SELLER_FALLBACK_LABEL,
         price: displayPrice,
         image: imageSrc,
         stock,
