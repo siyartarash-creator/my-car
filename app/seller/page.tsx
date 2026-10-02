@@ -4,6 +4,7 @@ import { getCurrentUserId } from "@/lib/auth-client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { resolveSellerBusinessIdentity } from "@/lib/seller-identity";
 
 export default function SellerDashboard() {
   const [stats, setStats] = useState({
@@ -13,6 +14,7 @@ export default function SellerDashboard() {
     totalStock: 0,
     pendingOrders: 0,
   });
+  const [businessName, setBusinessName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,7 +25,7 @@ export default function SellerDashboard() {
         return;
       }
 
-      const [myPricesRes, productsRes, requestsRes, pendingRes] =
+      const [myPricesRes, productsRes, requestsRes, pendingRes, profileRes] =
         await Promise.all([
           supabase
             .from("product_sellers")
@@ -40,7 +42,16 @@ export default function SellerDashboard() {
             .select("order_id,status")
             .eq("seller_id", userId)
             .eq("status", "pending"),
+          supabase
+            .from("profiles")
+            .select("name, phone1, phone2, about, social_links, data")
+            .eq("id", userId)
+            .single(),
         ]);
+
+      if (profileRes.data) {
+        setBusinessName(resolveSellerBusinessIdentity(profileRes.data).businessName);
+      }
 
       const myPrices = myPricesRes.data || [];
       const totalStock = myPrices.reduce((sum, p) => sum + (p.stock || 0), 0);
@@ -111,7 +122,7 @@ export default function SellerDashboard() {
   return (
     <div>
       <h2 className="mb-2 text-2xl font-bold md:text-3xl">
-        داشبورد <span className="text-[#39FF14]">فروشنده</span>
+        داشبورد <span className="text-[#39FF14]">{businessName ?? "فروشنده"}</span>
       </h2>
       <p className="mb-8 text-gray-400">خلاصه وضعیت فروشگاه شما</p>
 
