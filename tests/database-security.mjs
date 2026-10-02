@@ -621,6 +621,60 @@ await as(buyer,()=>check('select count(*)::int from admin_audit_log',0));
 await as(null,()=>deny('select count(*)::int from admin_audit_log'));
 await as(other,async()=>{ const n=(await db.query('select count(*)::int n from admin_audit_log')).rows[0].n; assert.ok(n>0);passed++; }); // Super Admin sees the full log
 
+// Phase 4 closure: orders.read adds only order-line SELECT visibility.
+// Compare exact row IDs with independently captured ownership/global sets,
+// including direct-ID probes and revocation (not just aggregate counts).
+const orderViewer='00000000-0000-0000-0000-000000000006';
+await db.exec(`insert into auth.users values ('${orderViewer}','{"name":"Order Viewer","mobile":"09100000006","user_type":"owner"}')`);
+// Legacy order_id is nullable: the new operator path must not expose an
+// orphan line that has no readable parent header. Existing owner/admin
+// visibility remains intact for this same row.
+const orphanItemId=(await db.query(`insert into order_items(order_id,product_name,product_price,quantity,seller_id) values(null,'Legacy Orphan',1000,1,'${seller}') returning id`)).rows[0].id;
+const itemIds=async(sql='select id from order_items order by id')=>(await db.query(sql)).rows.map(row=>row.id);
+const allItemIds=await itemIds();
+const attachedItemIds=await itemIds('select id from order_items where order_id is not null order by id');
+assert.ok(allItemIds.length>1);passed++;
+const buyerItemIds=await itemIds(`select i.id from order_items i join orders o on o.id=i.order_id where o.user_id='${buyer}' order by i.id`);
+const sellerItemIds=await itemIds(`select id from order_items where seller_id='${seller}' order by id`);
+await as(buyer,async()=>{assert.deepEqual(await itemIds(),buyerItemIds);passed++;});
+await as(seller,async()=>{assert.deepEqual(await itemIds(),sellerItemIds);passed++;});
+await as(other,async()=>{assert.deepEqual(await itemIds(),allItemIds);passed++;});
+await as(null,()=>deny('select id from order_items'));
+await as(null,async()=>{
+ await db.exec('set role authenticated');
+ await check("select has_permission('orders.read')",false);
+ await check('select count(*)::int from order_items',0);
+});
+await as(orderViewer,async()=>{
+ await check('select count(*)::int from order_items',0);
+ await check(`select count(*)::int from order_items where id=${allItemIds[0]}`,0);
+ await deny(`select admin_grant_permission('${orderViewer}','orders.read')`);
+ await deny(`insert into operator_permissions(profile_id,permission_key) values('${orderViewer}','orders.read')`);
+ await deny('update profiles set is_admin=true where id=auth.uid()');
+});
+for(const permission of ['products.write','offers.moderate','discounts.approve','requests.review','orders.read','coupons.manage']) {
+ await as(other,()=>db.exec(`select admin_grant_permission('${orderViewer}','${permission}')`));
+ await as(orderViewer,async()=>{
+  const expected=permission==='orders.read'?attachedItemIds:[];
+  assert.deepEqual(await itemIds(),expected,permission);passed++;
+  await check(`select count(*)::int from order_items where id=${allItemIds[0]}`,permission==='orders.read'?1:0);
+  if(permission==='orders.read') {
+   await check(`select count(*)::int from order_items where id=${orphanItemId}`,0);
+   for(const sql of [
+    `update order_items set quantity=2 where id=${allItemIds[0]}`,
+    `delete from order_items where id=${allItemIds[0]}`,
+    `insert into order_items(order_id,product_name,product_price,quantity,seller_id) select order_id,product_name,product_price,quantity,seller_id from order_items where id=${allItemIds[0]}`,
+   ]) {await assert.rejects(()=>db.exec(sql),/permission denied for table order_items/);passed++;}
+   await check('select count(*)::int from admin_audit_log',0);
+   await check('select count(*)::int from seller_fulfillments',0);
+   await check('select count(*)::int from coupon_usages',0);
+   await check('select count(*)::int from payouts',0);
+  }
+ });
+ await as(other,()=>db.exec(`select admin_revoke_permission('${orderViewer}','${permission}')`));
+ await as(orderViewer,()=>check('select count(*)::int from order_items',0));
+}
+
 const post=await db.exec(fs.readFileSync(path.join(base,'supabase/tests/post-deploy-check.sql'),'utf8'));
 for(const result of post)for(const row of result.rows??[])if('passed' in row){assert.equal(row.passed,true,row.check_name);passed++;}
 console.log(`${passed} database security/transaction assertions passed (${existing ? "existing schema" : "empty schema"}).`);

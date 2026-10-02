@@ -28,8 +28,11 @@ const KNOWN_ACTIONS = [
   "activate_coupon",
   "deactivate_coupon",
   "delete_coupon",
+  "create_product",
+  "update_product",
+  "delete_product",
 ] as const;
-const TARGET_TABLES = ["operator_permissions", "discount_requests", "product_sellers", "product_requests", "coupons"] as const;
+const TARGET_TABLES = ["operator_permissions", "discount_requests", "product_sellers", "product_requests", "coupons", "products"] as const;
 
 // Read-only Admin audit surface over admin_audit_log (Checkpoint C). No
 // mutation UI at all -- the table is already append-only with no
@@ -67,7 +70,13 @@ export default async function AdminAuditPage({
   if (params.action) query = query.eq("action", params.action);
   if (params.target_table) query = query.eq("target_table", params.target_table);
   if (params.from) query = query.gte("created_at", params.from);
-  if (params.to) query = query.lte("created_at", `${params.to}T23:59:59`);
+  if (params.to) {
+    const nextDay = new Date(`${params.to}T00:00:00Z`);
+    if (!Number.isNaN(nextDay.getTime())) {
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      query = query.lt("created_at", nextDay.toISOString());
+    }
+  }
 
   const { data, error } = await query;
   const rows = (data ?? []) as LogRow[];
