@@ -310,7 +310,7 @@ export default function RegisterPage() {
                 ورود به پنل کاربری
               </button>
               <Link
-                href={`/profile?type=${selectedType}`}
+                href="/profile"
                 className="inline-block rounded-lg border border-[#39FF14]/40 px-8 py-3 font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
               >
                 تکمیل پروفایل (اختیاری)

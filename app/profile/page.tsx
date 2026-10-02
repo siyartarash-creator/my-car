@@ -1,7 +1,7 @@
 "use client";
 import { getCurrentUserId, useIdentity } from "@/lib/auth-client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
@@ -18,6 +18,12 @@ import {
   getTrimsByModel,
   getYearsByTrim,
 } from "@/data/cars";
+import { provincesData } from "@/data/cities";
+import {
+  validateProfileForm,
+  isValid as isFormValid,
+  type FieldErrors,
+} from "@/lib/profile-validation";
 
 const fuelTypes = ["بنزین", "دوگانه‌سوز", "دیزل", "برقی", "هیبرید"];
 
@@ -64,7 +70,12 @@ function SectionTitle({ children, optional, hint, star }: { children: React.Reac
   );
 }
 
-function TextInput({ label, value, onChange, placeholder, optional, hint, star, ltr, maxLength, digitsOnly }: any) {
+function FieldError({ error }: { error?: string }) {
+  if (!error) return null;
+  return <p className="mt-1.5 text-xs text-red-400">⚠ {error}</p>;
+}
+
+function TextInput({ label, value, onChange, placeholder, optional, hint, star, ltr, maxLength, digitsOnly, error }: any) {
   return (
     <div>
       <SectionTitle optional={optional} hint={hint} star={star}>{label}</SectionTitle>
@@ -75,8 +86,12 @@ function TextInput({ label, value, onChange, placeholder, optional, hint, star, 
         placeholder={placeholder}
         dir={ltr ? "ltr" : "rtl"}
         maxLength={maxLength}
-        className={`w-full rounded-lg border border-[#39FF14]/20 bg-neutral-950 px-4 py-3 text-white outline-none transition placeholder:text-gray-600 focus:border-[#39FF14] ${ltr ? "text-left" : ""}`}
+        aria-invalid={!!error}
+        className={`w-full rounded-lg border bg-neutral-950 px-4 py-3 text-white outline-none transition placeholder:text-gray-600 ${
+          error ? "border-red-500/60 focus:border-red-500" : "border-[#39FF14]/20 focus:border-[#39FF14]"
+        } ${ltr ? "text-left" : ""}`}
       />
+      <FieldError error={error} />
     </div>
   );
 }
@@ -142,14 +157,15 @@ function MultiChipSelector({ options, values, onToggle }: { options: string[]; v
   );
 }
 
-function ContactInfo({ value, onChange }: any) {
+function ContactInfo({ value, onChange, errors }: any) {
   const v = value || {};
+  const e = errors || {};
   return (
     <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
       <h3 className="mb-5 text-base font-bold text-[#39FF14]">📞 اطلاعات تماس</h3>
       <div className="space-y-4">
-        <TextInput label="شماره تماس اصلی" value={v.phone1 || ""} onChange={(val: string) => onChange({ ...v, phone1: val })} placeholder="09xxxxxxxxx" ltr maxLength={11} digitsOnly />
-        <TextInput label="شماره تماس دوم" value={v.phone2 || ""} onChange={(val: string) => onChange({ ...v, phone2: val })} placeholder="09xxxxxxxxx" optional ltr maxLength={11} digitsOnly />
+        <TextInput label="شماره تماس اصلی" value={v.phone1 || ""} onChange={(val: string) => onChange({ ...v, phone1: val })} placeholder="09xxxxxxxxx" ltr maxLength={11} digitsOnly error={e.phone1} />
+        <TextInput label="شماره تماس دوم" value={v.phone2 || ""} onChange={(val: string) => onChange({ ...v, phone2: val })} placeholder="09xxxxxxxxx" optional ltr maxLength={11} digitsOnly error={e.phone2} />
       </div>
     </div>
   );
@@ -220,8 +236,9 @@ function SocialLinks({ value, onChange }: any) {
   );
 }
 
-function CarSelector({ value, onChange }: any) {
+function CarSelector({ value, onChange, errors }: any) {
   const v = value || {};
+  const e = errors || {};
   const set = (k: string, val: any) => onChange({ ...v, [k]: val });
 
   const models = v.brandId ? getModelsByBrand(v.brandId) : [];
@@ -313,7 +330,7 @@ function CarSelector({ value, onChange }: any) {
 
       {v.year && (
         <div className="space-y-4">
-          <TextInput label="کیلومتر کارکرد" value={v.mileage || ""} onChange={(val: string) => set("mileage", val)} placeholder="مثلاً 85000" hint="برای یادآوری سرویس‌های دوره‌ای" optional ltr maxLength={7} digitsOnly />
+          <TextInput label="کیلومتر کارکرد" value={v.mileage || ""} onChange={(val: string) => set("mileage", val)} placeholder="مثلاً 85000" hint="برای یادآوری سرویس‌های دوره‌ای" optional ltr maxLength={7} digitsOnly error={e.mileage} />
           {v.mileage && Number(v.mileage) > 0 && (
             <div className="flex items-center gap-2 rounded-lg border border-[#39FF14]/20 bg-neutral-900/50 px-3 py-2 text-xs text-gray-400">
               <span className="text-[#39FF14]">📍</span>
@@ -323,7 +340,7 @@ function CarSelector({ value, onChange }: any) {
           )}
           <div className="grid gap-4 md:grid-cols-2">
             <TextInput label="شماره پلاک" value={v.plate || ""} onChange={(val: string) => set("plate", val)} placeholder="۱۲ الف ۳۴۵ ایران ۱۱" optional />
-            <TextInput label="شماره شاسی (VIN)" value={v.vin || ""} onChange={(val: string) => set("vin", val)} placeholder="17 کاراکتر" optional ltr maxLength={17} />
+            <TextInput label="شماره شاسی (VIN)" value={v.vin || ""} onChange={(val: string) => set("vin", val)} placeholder="17 کاراکتر" optional ltr maxLength={17} error={e.vin} />
           </div>
         </div>
       )}
@@ -513,31 +530,33 @@ function ServiceExpertiseSelector({ value, onChange }: { value: string[]; onChan
   );
 }
 
-function OwnerForm({ carData, setCarData, addressData, setAddressData, contact, setContact }: any) {
+function OwnerForm({ carData, setCarData, addressData, setAddressData, contact, setContact, errors }: any) {
+  const e = errors || {};
   return (
     <>
-      <CarSelector value={carData} onChange={setCarData} />
+      <CarSelector value={carData} onChange={setCarData} errors={e} />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس</h3>
-        <AddressForm value={addressData} onChange={setAddressData} />
+        <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
-      <ContactInfo value={contact} onChange={setContact} />
+      <ContactInfo value={contact} onChange={setContact} errors={e} />
     </>
   );
 }
 
-function SellerForm({ sellerData, setSellerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, carExpertise, setCarExpertise, about, setAbout }: any) {
+function SellerForm({ sellerData, setSellerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, carExpertise, setCarExpertise, about, setAbout, errors }: any) {
+  const e = errors || {};
   return (
     <>
       <TextInput label="نام فروشگاه" value={sellerData.shopName || ""} onChange={(v: string) => setSellerData({ ...sellerData, shopName: v })} placeholder="مثلاً فروشگاه برق خودرو مهدی" />
 
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس فروشگاه</h3>
-        <AddressForm value={addressData} onChange={setAddressData} />
+        <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
 
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
-      <ContactInfo value={contact} onChange={setContact} />
+      <ContactInfo value={contact} onChange={setContact} errors={e} />
 
       <div>
         <SectionTitle>حوزه تخصص (چند انتخابی)</SectionTitle>
@@ -563,7 +582,8 @@ function SellerForm({ sellerData, setSellerData, addressData, setAddressData, co
   );
 }
 
-function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, carExpertise, setCarExpertise, serviceExpertise, setServiceExpertise, about, setAbout }: any) {
+function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, carExpertise, setCarExpertise, serviceExpertise, setServiceExpertise, about, setAbout, errors }: any) {
+  const e = errors || {};
   return (
     <>
       <TextInput
@@ -576,19 +596,19 @@ function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, c
 
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس محل کار</h3>
-        <AddressForm value={addressData} onChange={setAddressData} />
+        <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
 
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
-      <ContactInfo value={contact} onChange={setContact} />
+      <ContactInfo value={contact} onChange={setContact} errors={e} />
 
       <ServiceExpertiseSelector value={serviceExpertise} onChange={setServiceExpertise} />
 
       <CarExpertiseSelector value={carExpertise} onChange={setCarExpertise} />
 
-      <TextInput label="سال سابقه کار" value={sellerData.experience || ""} onChange={(v: string) => setSellerData({ ...sellerData, experience: v })} placeholder="مثلاً 15" ltr maxLength={2} digitsOnly />
+      <TextInput label="سال سابقه کار" value={sellerData.experience || ""} onChange={(v: string) => setSellerData({ ...sellerData, experience: v })} placeholder="مثلاً 15" ltr maxLength={2} digitsOnly error={e.experience} />
 
-      <TextInput label="گارانتی خدمات (ماه)" value={sellerData.warranty || ""} onChange={(v: string) => setSellerData({ ...sellerData, warranty: v })} placeholder="مثلاً 6" optional ltr maxLength={2} digitsOnly />
+      <TextInput label="گارانتی خدمات (ماه)" value={sellerData.warranty || ""} onChange={(v: string) => setSellerData({ ...sellerData, warranty: v })} placeholder="مثلاً 6" optional ltr maxLength={2} digitsOnly error={e.warranty} />
 
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-4 text-base font-bold text-[#39FF14]">🚙 خدمات سیار</h3>
@@ -605,16 +625,17 @@ function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, c
   );
 }
 
-function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, about, setAbout }: any) {
+function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, about, setAbout, errors }: any) {
+  const e = errors || {};
   return (
     <>
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس / منطقه فعالیت</h3>
-        <AddressForm value={addressData} onChange={setAddressData} />
+        <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
 
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
-      <ContactInfo value={contact} onChange={setContact} />
+      <ContactInfo value={contact} onChange={setContact} errors={e} />
 
       <div>
         <SectionTitle>نوع امداد (چند انتخابی)</SectionTitle>
@@ -629,9 +650,9 @@ function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData,
         <ChipSelector options={rescueVehicles} value={rescuerData.vehicle || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, vehicle: v })} />
       </div>
 
-      <TextInput label="شعاع سرویس‌دهی (کیلومتر)" value={rescuerData.radius || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, radius: v })} placeholder="مثلاً 30" ltr maxLength={3} digitsOnly />
+      <TextInput label="شعاع سرویس‌دهی (کیلومتر)" value={rescuerData.radius || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, radius: v })} placeholder="مثلاً 30" ltr maxLength={3} digitsOnly error={e.radius} />
 
-      <TextInput label="سال سابقه امدادگری" value={rescuerData.experience || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, experience: v })} placeholder="مثلاً 5" ltr maxLength={2} digitsOnly />
+      <TextInput label="سال سابقه امدادگری" value={rescuerData.experience || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, experience: v })} placeholder="مثلاً 5" ltr maxLength={2} digitsOnly error={e.experience} />
 
       <TextArea label="درباره من" value={about} onChange={setAbout} placeholder="معرفی کوتاه" optional />
 
@@ -640,16 +661,27 @@ function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData,
   );
 }
 
+function buildSnapshot(vals: {
+  addressData: any; contact: any; workingHours: any; socialLinks: any; about: string;
+  carData: any; carExpertise: string[]; serviceExpertise: string[]; sellerData: any; rescuerData: any;
+}) {
+  return JSON.stringify(vals);
+}
+
 function ProfileContent() {
   const { profile: identityProfile } = useIdentity();
   const router = useRouter();
   const type = identityProfile?.user_type ?? "owner";
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [userId, setUserId] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | "cancel" | "leave">(null);
 
   const [addressData, setAddressData] = useState<AddressData>(emptyAddress);
   const [contact, setContact] = useState<any>({});
@@ -663,48 +695,131 @@ function ProfileContent() {
   const [sellerData, setSellerData] = useState<any>({});
   const [rescuerData, setRescuerData] = useState<any>({});
 
-  useEffect(() => {
-    const loadProfile = async () => {
-      const storedId = await getCurrentUserId();
-      if (!storedId) {
-        router.push("/login");
-        return;
-      }
-      setUserId(storedId);
+  const snapshotRef = useRef<string | null>(null);
+  const initialValuesRef = useRef<Parameters<typeof buildSnapshot>[0] | null>(null);
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", storedId)
-        .single();
+  const currentValues = () => ({
+    addressData, contact, workingHours, socialLinks, about,
+    carData, carExpertise, serviceExpertise, sellerData, rescuerData,
+  });
 
-      if (error || !data) {
-        setLoading(false);
-        return;
-      }
+  const loadProfile = async () => {
+    setLoading(true);
+    setLoadError(false);
+    const storedId = await getCurrentUserId();
+    if (!storedId) {
+      router.push("/login");
+      return;
+    }
+    setUserId(storedId);
 
-      const extra = data.data || {};
-      setAddressData(data.address_data || emptyAddress);
-      setContact({ phone1: data.phone1, phone2: data.phone2 });
-      setWorkingHours(data.working_hours || {});
-      setSocialLinks(data.social_links || {});
-      setAbout(data.about || "");
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", storedId)
+      .single();
 
-      setCarData(extra.car || {});
-      setCarExpertise(extra.carExpertise || []);
-      setServiceExpertise(extra.serviceExpertise || []);
-      setSellerData(extra.seller || {});
-      setRescuerData(extra.rescuer || {});
-
+    if (error || !data) {
+      setLoadError(true);
       setLoading(false);
+      return;
+    }
+
+    const extra = data.data || {};
+    const loaded = {
+      addressData: data.address_data || emptyAddress,
+      contact: { phone1: data.phone1, phone2: data.phone2 },
+      workingHours: data.working_hours || {},
+      socialLinks: data.social_links || {},
+      about: data.about || "",
+      carData: extra.car || {},
+      carExpertise: extra.carExpertise || [],
+      serviceExpertise: extra.serviceExpertise || [],
+      sellerData: extra.seller || {},
+      rescuerData: extra.rescuer || {},
     };
+
+    setAddressData(loaded.addressData);
+    setContact(loaded.contact);
+    setWorkingHours(loaded.workingHours);
+    setSocialLinks(loaded.socialLinks);
+    setAbout(loaded.about);
+    setCarData(loaded.carData);
+    setCarExpertise(loaded.carExpertise);
+    setServiceExpertise(loaded.serviceExpertise);
+    setSellerData(loaded.sellerData);
+    setRescuerData(loaded.rescuerData);
+
+    initialValuesRef.current = loaded;
+    snapshotRef.current = buildSnapshot(loaded);
+    setDirty(false);
+    setFieldErrors({});
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadProfile();
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (loading || !snapshotRef.current) return;
+    setDirty(buildSnapshot(currentValues()) !== snapshotRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressData, contact, workingHours, socialLinks, about, carData, carExpertise, serviceExpertise, sellerData, rescuerData, loading]);
+
+  const restoreSnapshot = () => {
+    const initial = initialValuesRef.current;
+    if (!initial) return;
+    setAddressData(initial.addressData);
+    setContact(initial.contact);
+    setWorkingHours(initial.workingHours);
+    setSocialLinks(initial.socialLinks);
+    setAbout(initial.about);
+    setCarData(initial.carData);
+    setCarExpertise(initial.carExpertise);
+    setServiceExpertise(initial.serviceExpertise);
+    setSellerData(initial.sellerData);
+    setRescuerData(initial.rescuerData);
+    setFieldErrors({});
+    setSaveError("");
+    setDirty(false);
+  };
+
+  const requestCancel = () => {
+    if (dirty) setConfirmAction("cancel");
+    else restoreSnapshot();
+  };
+
+  const requestLeave = () => {
+    if (dirty) setConfirmAction("leave");
+    else router.push("/dashboard");
+  };
+
+  const confirmDiscard = () => {
+    if (confirmAction === "cancel") restoreSnapshot();
+    if (confirmAction === "leave") router.push("/dashboard");
+    setConfirmAction(null);
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setSaveError("");
+
+    const errors = validateProfileForm(
+      type as any,
+      { addressData, contact, carData, sellerData, rescuerData },
+      provincesData
+    );
+    setFieldErrors(errors);
+    if (!isFormValid(errors)) {
+      setSaveError("لطفاً خطاهای فرم را بررسی و اصلاح کنید");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    setSaving(true);
 
     const extra: any = {};
     if (type === "owner") extra.car = carData;
@@ -732,6 +847,10 @@ function ProfileContent() {
       return;
     }
 
+    const savedValues = currentValues();
+    initialValuesRef.current = savedValues;
+    snapshotRef.current = buildSnapshot(savedValues);
+    setDirty(false);
     setSaving(false);
     setSaved(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -754,7 +873,31 @@ function ProfileContent() {
     );
   }
 
-  const formProps = { addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, about, setAbout };
+  if (loadError) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-24 text-center">
+        <span className="text-5xl">⚠️</span>
+        <h2 className="text-xl font-bold text-red-400">پروفایل بارگذاری نشد</h2>
+        <p className="text-sm text-gray-400">
+          متأسفانه اطلاعات پروفایل شما در دسترس نیست. ممکن است اتصال شما قطع شده باشد یا مشکلی موقت پیش آمده باشد.
+        </p>
+        <div className="flex w-full flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => loadProfile()}
+            className="w-full rounded-lg bg-[#39FF14] px-8 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/80"
+          >
+            تلاش دوباره
+          </button>
+          <Link href="/dashboard" className="block w-full rounded-lg border border-[#39FF14]/30 px-8 py-3 text-center font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10">
+            برگشت به پنل کاربری
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const formProps = { addressData, setAddressData, contact, setContact, workingHours, setWorkingHours, socialLinks, setSocialLinks, about, setAbout, errors: fieldErrors };
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -781,6 +924,31 @@ function ProfileContent() {
         </div>
       )}
 
+      {confirmAction && (
+        <div className="mb-6 rounded-2xl border border-yellow-500/40 bg-yellow-500/5 p-5">
+          <p className="font-bold text-yellow-400">تغییرات ذخیره‌نشده دارید</p>
+          <p className="mt-1 text-sm text-gray-400">
+            اگر الان ادامه بدهی، تغییراتی که هنوز ذخیره نکردی از بین می‌رن. مطمئنی؟
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={confirmDiscard}
+              className="rounded-lg bg-red-500/20 px-5 py-2 text-sm font-bold text-red-400 transition hover:bg-red-500/30"
+            >
+              بله، تغییرات را نادیده بگیر
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmAction(null)}
+              className="rounded-lg border border-[#39FF14]/30 px-5 py-2 text-sm font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
+            >
+              انصراف، برگرد به ویرایش
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mb-8">
         <AvatarPicker />
       </div>
@@ -795,9 +963,22 @@ function ProfileContent() {
           {saving ? "در حال ذخیره..." : "ذخیره اطلاعات"}
         </button>
 
-        <Link href="/dashboard" className="block w-full rounded-lg border border-[#39FF14]/30 px-8 py-3 text-center font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10">
+        <button
+          type="button"
+          onClick={requestCancel}
+          disabled={!dirty}
+          className="w-full rounded-lg border border-yellow-500/30 px-8 py-3 text-center font-bold text-yellow-400 transition hover:bg-yellow-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          انصراف از تغییرات
+        </button>
+
+        <button
+          type="button"
+          onClick={requestLeave}
+          className="block w-full rounded-lg border border-[#39FF14]/30 px-8 py-3 text-center font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
+        >
           برگشت به پنل کاربری
-        </Link>
+        </button>
       </form>
     </section>
   );

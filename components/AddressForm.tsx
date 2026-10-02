@@ -26,13 +26,21 @@ type AddressFormProps = {
   value: AddressData;
   onChange: (address: AddressData) => void;
   showMap?: boolean;
+  errors?: Partial<Record<keyof AddressData, string>>;
 };
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="mt-1.5 text-xs text-red-400">⚠ {message}</p>;
+}
 
 export function AddressForm({
   value,
   onChange,
   showMap = true,
+  errors,
 }: AddressFormProps) {
+  const fieldErrors = errors || {};
   const provinces = Object.keys(provincesData);
   const cities = value.province ? provincesData[value.province] || [] : [];
 
@@ -74,7 +82,9 @@ export function AddressForm({
           <select
             value={value.province}
             onChange={(e) => handleProvinceChange(e.target.value)}
-            className="w-full rounded-lg border border-[#39FF14]/20 bg-neutral-950 px-4 py-3 text-white outline-none transition focus:border-[#39FF14]"
+            className={`w-full rounded-lg border bg-neutral-950 px-4 py-3 text-white outline-none transition ${
+              fieldErrors.province ? "border-red-500/60 focus:border-red-500" : "border-[#39FF14]/20 focus:border-[#39FF14]"
+            }`}
             required
           >
             <option value="">— انتخاب کن —</option>
@@ -84,6 +94,7 @@ export function AddressForm({
               </option>
             ))}
           </select>
+          <FieldError message={fieldErrors.province} />
         </div>
         <div>
           <label className="mb-2 block text-sm font-bold text-gray-300">
@@ -93,7 +104,9 @@ export function AddressForm({
             value={value.city}
             onChange={(e) => set("city", e.target.value)}
             disabled={!value.province}
-            className="w-full rounded-lg border border-[#39FF14]/20 bg-neutral-950 px-4 py-3 text-white outline-none transition focus:border-[#39FF14] disabled:cursor-not-allowed disabled:opacity-50"
+            className={`w-full rounded-lg border bg-neutral-950 px-4 py-3 text-white outline-none transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              fieldErrors.city ? "border-red-500/60 focus:border-red-500" : "border-[#39FF14]/20 focus:border-[#39FF14]"
+            }`}
             required
           >
             <option value="">
@@ -105,6 +118,7 @@ export function AddressForm({
               </option>
             ))}
           </select>
+          <FieldError message={fieldErrors.city} />
         </div>
       </div>
 
@@ -133,9 +147,12 @@ export function AddressForm({
             value={value.street}
             onChange={(e) => set("street", e.target.value)}
             placeholder="مثلاً خیابان ولیعصر"
-            className="w-full rounded-lg border border-[#39FF14]/20 bg-neutral-950 px-4 py-3 text-white outline-none transition placeholder:text-gray-600 focus:border-[#39FF14]"
+            className={`w-full rounded-lg border bg-neutral-950 px-4 py-3 text-white outline-none transition placeholder:text-gray-600 ${
+              fieldErrors.street ? "border-red-500/60 focus:border-red-500" : "border-[#39FF14]/20 focus:border-[#39FF14]"
+            }`}
             required
           />
+          <FieldError message={fieldErrors.street} />
         </div>
         <div>
           <label className="mb-2 block text-sm font-bold text-gray-300">
@@ -164,8 +181,11 @@ export function AddressForm({
           }
           placeholder="۱۰ رقم"
           dir="ltr"
-          className="w-full rounded-lg border border-[#39FF14]/20 bg-neutral-950 px-4 py-3 text-left text-white outline-none transition placeholder:text-gray-600 focus:border-[#39FF14]"
+          className={`w-full rounded-lg border bg-neutral-950 px-4 py-3 text-left text-white outline-none transition placeholder:text-gray-600 ${
+            fieldErrors.postal_code ? "border-red-500/60 focus:border-red-500" : "border-[#39FF14]/20 focus:border-[#39FF14]"
+          }`}
         />
+        <FieldError message={fieldErrors.postal_code} />
       </div>
 
       {/* موقعیت مکانی */}

@@ -60,7 +60,6 @@ function getMissingFields(
 export function ProfileStatusCard() {
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState<string[]>([]);
-  const [userType, setUserType] = useState("owner");
 
   useEffect(() => {
     const load = async () => {
@@ -79,7 +78,6 @@ export function ProfileStatusCard() {
       if (data) {
         const p = data as Profile;
         const type = p.user_type || "owner";
-        setUserType(type);
         setMissing(getMissingFields(p, type));
       }
       setLoading(false);
@@ -107,7 +105,7 @@ export function ProfileStatusCard() {
           </div>
         </div>
         <Link
-          href={`/profile?type=${userType}`}
+          href="/profile"
           className="shrink-0 rounded-full border border-[#39FF14]/40 px-4 py-2 text-xs font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
         >
           مشاهده پروفایل
@@ -142,7 +140,7 @@ export function ProfileStatusCard() {
           </div>
         </div>
         <Link
-          href={`/profile?type=${userType}`}
+          href="/profile"
           className="shrink-0 rounded-lg bg-yellow-500/20 px-5 py-2 text-sm font-bold text-yellow-400 transition hover:bg-yellow-500/30"
         >
           تکمیل پروفایل ←
