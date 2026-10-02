@@ -35,3 +35,5 @@ Safety notes:
 4. Case marked `published` and linked to that entry via `published_entry_id` -- enforced by a DB constraint, so a case can't be marked published without an actual entry behind it.
 
 Until real cases exist, only `isFixture: true` test data populates the pipeline (see `tests/automotive/fixtures.mjs`) -- those are clearly marked and excluded from retrieval, never shown as real knowledge.
+
+If this template is filled in from free-text narration with AI assistance (structuring, not inventing content), that goes through `lib/automotive/knowledge/` first -- see [ARCHITECTURE.md §14](./ARCHITECTURE.md#14-knowledge-draft-authoring-layer-pre-intake) -- and still ends up submitted through this same form/contract, with the same human-review requirement either way.

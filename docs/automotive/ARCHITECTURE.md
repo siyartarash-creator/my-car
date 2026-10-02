@@ -80,20 +80,33 @@ See [MEHDI_CASE_TEMPLATE.md](./MEHDI_CASE_TEMPLATE.md) for the intake format.
 
 ## 13. Milestone 2 -- minimal evaluation foundation
 
-`lib/automotive/evaluation.ts` defines a small `EvalScenario`/`runScenario`/`runEvaluationSuite` contract: deterministic assertions over `runDiagnosticQuery` output -- retrieval correctness (expected cited entries), evidence grounding (every claim's evidence IDs exist in the response), next-diagnostic-step correctness, safety behavior (a risk level never carries action guidance), and vehicle-applicability handling. `tests/automotive/evaluation.test.mjs` runs it against clearly-marked fixture scenarios only -- never presented as real mechanic knowledge. No paid LLM judge; everything is a structural assertion.
+`lib/automotive/evaluation.ts` defines a small `EvalScenario`/`runScenario`/`runEvaluationSuite` contract: deterministic assertions over `runDiagnosticQuery` output -- retrieval correctness (expected cited entries), evidence grounding (every claim's evidence IDs exist in the response), next-diagnostic-step correctness, safety behavior (a risk level never carries action guidance), and vehicle-applicability handling. `tests/automotive/evaluation.test.mjs` runs it against clearly-marked fixture scenarios only -- never presented as real mechanic knowledge, including a vehicle-mismatch-correctly-excluded case and a non-brake (`cooling`) safety-critical case alongside the original four. No paid LLM judge; everything is a structural assertion. This remains the one evaluation framework for Automotive AI -- there is no separate/competing evaluation representation.
 
-## 14. Current limitations
+## 14. Knowledge draft authoring layer (pre-intake)
+
+`lib/automotive/knowledge/` sits in front of `caseIntake.ts`, not beside it: it is where a real case gets structured and validated *before* it is confirmed and handed to `parseCaseIntakeDraft()`, which remains the single source of truth for what can become an `automotive_case_intake` row.
+
+- **`types.ts`**: `StructuredCaseDraft` -- vehicle applicability, symptoms, mechanic observations, diagnostic tests, measured results, candidate causes, confirmed cause, repair/outcome, mechanic notes, provenance, confidence, risk, review state. Every optional field is `Maybe<T>` (`{ known: true, value } | { known: false }`) so an unknown fact is never fabricated. Two provenance axes are kept separate: `origin` (who/what produced *this draft record* -- `mechanic_authored` / `ai_structured` / `fixture`) vs. `provenance` (the `KnowledgeSourceType` it would carry once published). This is what keeps "AI structured Mehdi's words" distinguishable from "Mehdi typed this himself."
+- **`draftContract.ts#validateCaseDraft`**: hard invariants -- allowed enum values, minimum content, a fixture can never claim literal mechanic authorship, a confirmed cause must be one of the candidate causes and have diagnostic/measured support, and `reviewStatus: "published"` requires both review metadata and `isFixture: false`.
+- **`qualityChecks.ts#checkDraftQuality`**: non-blocking warnings (repair without outcome, a safety-sensitive keyword with a low risk classification, etc.).
+- **`narrationProvider.ts#CaseDraftProvider`**: the seam a future AI extractor implements to propose a draft from free-text narration ("Peugeot 206 cranked normally but would not start..."). No external AI call exists in this repository; `TEST_ONLY_mockCaseDraftProvider` is a deterministic test-only stand-in whose output is always `isFixture: true`, which independently blocks it from ever reaching `reviewStatus: "published"`.
+- **`toCaseIntake.ts#draftToCaseIntakeInput`**: the one adapter from a completed draft to `CaseIntakeDraftInput`. It never sets `confirmedRealCase` itself -- that must still be supplied explicitly by whoever is confirming the case, exactly as when calling `parseCaseIntakeDraft()` directly -- and it refuses (​`DraftNotReadyForIntakeError`) a fixture draft or one still missing a confirmed repair/outcome.
+
+Pipeline: Mehdi narration -> `CaseDraftProvider.proposeDraft()` -> `StructuredCaseDraft` -> `validateCaseDraft` + `checkDraftQuality` -> human review/confirmation -> `draftToCaseIntakeInput` -> `parseCaseIntakeDraft()` (unchanged) -> DB insert, draft status only.
+
+## 15. Current limitations
 
 - No real knowledge entries exist yet; only `isFixture: true` test data exercises the pipeline (see `tests/automotive/fixtures.mjs`).
 - Retrieval is keyword-substring matching, not semantic -- see trigger criteria above.
 - No real LLM wired up (`$0` external spend); narration is template-based; the structured provider boundary exists but has no real implementation yet.
 - Progressive diagnosis narrows only on explicit `relatedToEntryId` + `result` observations supplied by the caller -- it does not yet infer which entry an unstructured observation is "about".
 - `app/automotive/assistant` is internal-only (admin-gated), not linked from public navigation.
+- No real `CaseDraftProvider` implementation exists yet -- only the test-only mock. No real `StructuredCaseDraft` has been authored yet; only fixtures exercise the validation/quality-check path.
 
-## 15. Future OBD/CAN reference (not implemented)
+## 16. Future OBD/CAN reference (not implemented)
 
 [OBDb](https://github.com/OBDb) was identified as a future reference for per-vehicle OBD/CAN/UDS signal definitions, licensed CC-BY-SA-4.0. It is **not** ingested in Milestone 2 and no OBD/ELM327/CAN infrastructure exists. When OBD data or live-vehicle tooling is eventually added, any OBDb-derived data carries its CC-BY-SA-4.0 attribution requirement explicitly, and any tool capability should be read-only-by-construction (the `obd-mcp-server` principle) -- blocked by capability architecture, not by a prompt instruction. The current contracts (`DiagnosticQuery`, `StructuredReasoningRequest`) assume no action-execution capability, so adding a read-only tool later does not require re-architecting the safety boundary.
 
-## 16. Parallel-development boundaries
+## 17. Parallel-development boundaries
 
 Track B owns `lib/automotive/`, `app/automotive/`, `tests/automotive/`, and `docs/automotive/` exclusively. It does not modify: Store order flows, checkout, cart, products, offers, coupons, fulfillment, Store admin pages, `product_compatibility`, or any existing Store RLS policy. It references `public.profiles(id)` for ownership but does not alter the profiles table or its triggers. The automotive schema now lives in `supabase/migrations/202610021000_automotive_foundation.sql` (reconciled after Store Phase 5 completed; Phase 5's last migration, `202610020001_admin_order_item_read.sql`, sits before it in sequence with no timestamp collision).

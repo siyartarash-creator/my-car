@@ -70,4 +70,24 @@ export const FIXTURE_ENTRIES = [
     reviewStatus: "draft", // not published -- must never be retrieved
     isFixture: true,
   },
+  {
+    // Deliberately worded without "overheat(s)" so it never collides with
+    // the "draft entry never retrieved" check above, which queries
+    // "overheats idle" to uniquely target fx-4-draft.
+    id: "fx-5",
+    sourceType: "mechanic_authored",
+    system: "cooling",
+    subsystem: null,
+    component: null,
+    symptom: "coolant temperature warning light with visible smoke under the hood",
+    possibleCause: "active cooling system failure requiring immediate shutdown",
+    diagnosticTest: "confirm vehicle has been stopped safely before inspection",
+    expectedResult: "temperature drops after shutdown; persistent smoke needs professional inspection",
+    repairAction: "allow full cooldown, then inspect for coolant leaks before restarting",
+    vehicleApplicability: [],
+    confidence: "medium",
+    riskLevel: "safety_critical",
+    reviewStatus: "published",
+    isFixture: true,
+  },
 ];

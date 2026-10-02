@@ -47,6 +47,18 @@ const scenarios = [
     query: { question: "engine cranks but does not start" },
     expect: { status: "clarification_needed", requiresVehicleContext: true, nextDiagnosticStepIncludes: "fuel pressure" },
   },
+  {
+    name: "fixture: vehicle context given but mismatched excludes the vehicle-specific entry, not the broad one",
+    entries: entries.filter((e) => e.id === "fx-1" || e.id === "fx-2"),
+    query: { question: "engine cranks but does not start", vehicle: { make: "Honda" } },
+    expect: { status: "grounded", citedEntryIds: ["fx-1"] },
+  },
+  {
+    name: "fixture: safety-critical cooling-system failure never carries action guidance even when authorized",
+    entries,
+    query: { question: "coolant temperature warning light and visible smoke", allowActionGuidance: true },
+    expect: { status: "grounded", citedEntryIds: ["fx-5"], neverActionableRiskLevels: ["safety_critical"] },
+  },
 ];
 
 const summary = evaluation.runEvaluationSuite(scenarios);
