@@ -55,7 +55,9 @@ function numberInRange(value: string | undefined, min: number, max: number): boo
   return n >= min && n <= max;
 }
 
-export function validateOwnerExtra(carData: { mileage?: string; vin?: string } | null | undefined): FieldErrors {
+export function validateOwnerExtra(
+  carData: { mileage?: string; vin?: string; displayName?: string } | null | undefined
+): FieldErrors {
   const errors: FieldErrors = {};
   if (carData?.mileage && !numberInRange(carData.mileage, 0, 2000000)) {
     errors.mileage = "کیلومتر کارکرد باید عددی بین ۰ تا ۲,۰۰۰,۰۰۰ باشد";
@@ -64,6 +66,9 @@ export function validateOwnerExtra(carData: { mileage?: string; vin?: string } |
   // no new VIN checksum/format policy is introduced.
   if (carData?.vin && carData.vin.trim().length !== 17) {
     errors.vin = "شماره شاسی (VIN) باید ۱۷ کاراکتر باشد";
+  }
+  if (carData?.displayName && carData.displayName.trim().length > 40) {
+    errors.displayName = "نام ماشین باید حداکثر ۴۰ کاراکتر باشد";
   }
   return errors;
 }
@@ -99,7 +104,7 @@ export type ProfileFormType = "owner" | "seller" | "service" | "rescuer";
 export type ProfileFormState = {
   addressData: { province?: string; city?: string; street?: string; postal_code?: string } | null | undefined;
   contact: { phone1?: string; phone2?: string } | null | undefined;
-  carData?: { mileage?: string; vin?: string } | null | undefined;
+  carData?: { mileage?: string; vin?: string; displayName?: string } | null | undefined;
   sellerData?: { experience?: string; warranty?: string } | null | undefined;
   rescuerData?: { radius?: string; experience?: string } | null | undefined;
 };
