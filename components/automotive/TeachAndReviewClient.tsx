@@ -15,7 +15,7 @@ import type { StructuredCaseDraft } from "@/lib/automotive/knowledge/types";
 
 export interface TeachAndReviewClientProps {
   reviewerProfileId: string;
-  onSubmit: (reviewable: ReviewableCaseDraft) => Promise<{ id: string }>;
+  onSubmit: (reviewable: ReviewableCaseDraft) => Promise<{ id: string } | { error: string }>;
 }
 
 export function TeachAndReviewClient({ reviewerProfileId, onSubmit }: TeachAndReviewClientProps) {
@@ -38,7 +38,12 @@ export function TeachAndReviewClient({ reviewerProfileId, onSubmit }: TeachAndRe
     setSubmitting(true);
     setSubmitError(null);
     try {
-      setSubmitResult(await onSubmit(reviewable));
+      const result = await onSubmit(reviewable);
+      if ("error" in result) {
+        setSubmitError(result.error);
+      } else {
+        setSubmitResult(result);
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "ثبت نهایی انجام نشد.");
     } finally {
