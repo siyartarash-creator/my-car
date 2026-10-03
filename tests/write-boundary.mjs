@@ -59,5 +59,19 @@ function request(action,body,origin='https://mycar.test',type='application/json'
  assert.equal(redirected.status,307);passed++;
  assert.equal(redirected.cookies.get('test-session-a').value,'first');passed++;
  assert.equal(redirected.headers.get('cache-control'),'private, no-store');passed++;
+ // Server Actions must bypass the cookie-rewrite dance entirely (Netlify
+ // Edge Functions regression: that rewrite corrupted the Server Action's
+ // response, surfacing as "An unexpected response was received from the
+ // server" with the action never completing). Prove it never even touches
+ // Supabase for such a request.
+ let supabaseTouched=false;
+ const {refreshSession:refreshSessionStrict}=load('lib/session-proxy.ts',{
+  'next/server':{NextResponse},
+  '@supabase/ssr':{createServerClient:()=>{supabaseTouched=true;throw new Error('must not be called for a Server Action request');}},
+ });
+ const actionReq=new NextRequest('https://mycar.test/automotive/teach',{headers:{'next-action':'abcdef'}});
+ const bypassed=await refreshSessionStrict(actionReq);
+ assert.equal(supabaseTouched,false);passed++;
+ assert.equal(bypassed.cookies.getAll().length,0);passed++;
  console.log(`${passed} HTTP boundary assertions passed.`);
 })().catch(e=>{console.error(e);process.exitCode=1});
