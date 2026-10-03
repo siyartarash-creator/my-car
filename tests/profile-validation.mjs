@@ -58,6 +58,9 @@ check(validateOwnerExtra({}).displayName === undefined, "empty displayName is op
 check(validateSellerExtra({ experience: "15", warranty: "6" }).experience === undefined, "valid experience accepted");
 check(validateSellerExtra({ experience: "200" }).experience !== undefined, "out-of-range experience rejected");
 check(validateSellerExtra({ warranty: "500" }).warranty !== undefined, "out-of-range warranty rejected");
+check(validateSellerExtra({ minOrder: "500000" }).minOrder === undefined, "reasonable minOrder accepted");
+check(validateSellerExtra({ minOrder: "abc" }).minOrder !== undefined, "non-numeric minOrder rejected");
+check(validateSellerExtra({}).minOrder === undefined, "empty minOrder is optional");
 
 // rescuer extra
 check(validateRescuerExtra({ radius: "30" }).radius === undefined, "valid radius accepted");

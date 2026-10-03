@@ -252,7 +252,7 @@ function SocialLinks({ value, onChange }: any) {
     <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
       <h3 className="mb-5 text-base font-bold text-[#39FF14]">🔗 شبکه‌های اجتماعی</h3>
       <div className="space-y-4">
-        <TextInput label="واتساپ" value={v.whatsapp || ""} onChange={(val: string) => onChange({ ...v, whatsapp: val })} placeholder="09xxxxxxxxx" optional ltr />
+        <TextInput label="واتساپ" value={v.whatsapp || ""} onChange={(val: string) => onChange({ ...v, whatsapp: val })} placeholder="09xxxxxxxxx" hint="فرمت پیشنهادی: شماره موبایل با 09" optional ltr />
         <TextInput label="اینستاگرام" value={v.instagram || ""} onChange={(val: string) => onChange({ ...v, instagram: val })} placeholder="@username" optional ltr />
         <TextInput label="تلگرام" value={v.telegram || ""} onChange={(val: string) => onChange({ ...v, telegram: val })} placeholder="@username" optional ltr />
       </div>
@@ -372,7 +372,7 @@ function CarSelector({ value, onChange, errors }: any) {
   );
 }
 
-function CarExpertiseSelector({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+function CarExpertiseSelector({ value, onChange, subtitle }: { value: string[]; onChange: (v: string[]) => void; subtitle?: string }) {
   const selected = value || [];
   const [openBrands, setOpenBrands] = useState<string[]>([]);
   const availableBrands = carBrands.filter((b) => ["iranian", "chinese", "foreign"].includes(b.category));
@@ -407,7 +407,7 @@ function CarExpertiseSelector({ value, onChange }: { value: string[]; onChange: 
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h3 className="text-base font-bold text-[#39FF14]">🚗 خودروهای تحت پوشش</h3>
-          <p className="mt-1 text-xs text-gray-400">اون خودروهایی که تخصص داری رو تیک بزن</p>
+          <p className="mt-1 text-xs text-gray-400">{subtitle || "اون خودروهایی که تخصص داری رو تیک بزن"}</p>
         </div>
         {selected.length > 0 && (
           <div className="rounded-full border border-[#39FF14]/40 bg-[#39FF14]/10 px-3 py-1 text-xs font-bold text-[#39FF14]">
@@ -625,11 +625,15 @@ function SellerForm({ sellerData, setSellerData, addressData, setAddressData, co
           <ChipSelector options={sellerTypes} value={sellerData.saleType || ""} onChange={(v: string) => setSellerData({ ...sellerData, saleType: v })} />
         </div>
       </div>
-      <CarExpertiseSelector value={carExpertise} onChange={setCarExpertise} />
+      <CarExpertiseSelector
+        value={carExpertise}
+        onChange={setCarExpertise}
+        subtitle="خودروهایی که برای آن‌ها قطعه می‌فروشی رو تیک بزن"
+      />
 
       <GroupHeading icon="✨" title="جزئیات تکمیلی" hint="(اختیاری)" />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
-        <TextInput label="حداقل مبلغ سفارش (تومان)" value={sellerData.minOrder || ""} onChange={(v: string) => setSellerData({ ...sellerData, minOrder: v })} placeholder="مثلاً 500000" optional ltr digitsOnly hint="خالی بگذارید = بدون محدودیت" />
+        <TextInput label="حداقل مبلغ سفارش (تومان)" value={sellerData.minOrder || ""} onChange={(v: string) => setSellerData({ ...sellerData, minOrder: v })} placeholder="مثلاً 500000" optional ltr digitsOnly hint="خالی بگذارید = بدون محدودیت" error={e.minOrder} />
       </div>
       <TextArea label="درباره فروشگاه" value={about} onChange={setAbout} placeholder="معرفی کوتاه" optional />
       <SocialLinks value={socialLinks} onChange={setSocialLinks} />
@@ -670,7 +674,11 @@ function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, c
 
       <GroupHeading icon="🧰" title="تخصص و سابقه" />
       <ServiceExpertiseSelector value={serviceExpertise} onChange={setServiceExpertise} />
-      <CarExpertiseSelector value={carExpertise} onChange={setCarExpertise} />
+      <CarExpertiseSelector
+        value={carExpertise}
+        onChange={setCarExpertise}
+        subtitle="خودروهایی که برای تعمیر و سرویس آن‌ها تخصص داری رو تیک بزن"
+      />
 
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <div className="grid gap-4 md:grid-cols-2">
@@ -894,21 +902,42 @@ function ProfileContent() {
 
     setSaving(true);
 
+    // Trim free-text fields before persisting — a save-time data-quality
+    // pass only; it never rejects a save, it just stops stray leading/
+    // trailing whitespace from accumulating in the stored JSONB.
+    const trimStr = (s: string | null | undefined) => (s || "").trim();
+    const trimOpt = (s: string | null | undefined) => (typeof s === "string" ? s.trim() : s);
+    const cleanedAddressData = {
+      ...addressData,
+      region: trimStr(addressData.region),
+      street: trimStr(addressData.street),
+      alley: trimStr(addressData.alley),
+    };
+    const cleanedAbout = trimOpt(about) || "";
+    const cleanedSocialLinks = {
+      ...socialLinks,
+      whatsapp: trimOpt(socialLinks.whatsapp),
+      instagram: trimOpt(socialLinks.instagram),
+      telegram: trimOpt(socialLinks.telegram),
+    };
+    const cleanedCarData = { ...carData, displayName: trimOpt(carData.displayName) };
+    const cleanedSellerData = { ...sellerData, shopName: trimOpt(sellerData.shopName) };
+
     const extra: any = {};
-    if (type === "owner") extra.car = carData;
-    if (type === "seller") { extra.seller = sellerData; extra.carExpertise = carExpertise; }
-    if (type === "service") { extra.serviceExpertise = serviceExpertise; extra.carExpertise = carExpertise; extra.seller = sellerData; }
+    if (type === "owner") extra.car = cleanedCarData;
+    if (type === "seller") { extra.seller = cleanedSellerData; extra.carExpertise = carExpertise; }
+    if (type === "service") { extra.serviceExpertise = serviceExpertise; extra.carExpertise = carExpertise; extra.seller = cleanedSellerData; }
     if (type === "rescuer") extra.rescuer = rescuerData;
 
     const { error } = await supabase
       .from("profiles")
       .update({
-        address_data: addressData,
+        address_data: cleanedAddressData,
         phone1: contact.phone1 || null,
         phone2: contact.phone2 || null,
         working_hours: workingHours,
-        social_links: socialLinks,
-        about: about || null,
+        social_links: cleanedSocialLinks,
+        about: cleanedAbout || null,
         data: extra,
         updated_at: new Date().toISOString(),
       })
@@ -920,7 +949,20 @@ function ProfileContent() {
       return;
     }
 
-    const savedValues = currentValues();
+    setAddressData(cleanedAddressData);
+    setAbout(cleanedAbout);
+    setSocialLinks(cleanedSocialLinks);
+    if (type === "owner") setCarData(cleanedCarData);
+    if (type === "seller" || type === "service") setSellerData(cleanedSellerData);
+
+    const savedValues = {
+      ...currentValues(),
+      addressData: cleanedAddressData,
+      about: cleanedAbout,
+      socialLinks: cleanedSocialLinks,
+      carData: type === "owner" ? cleanedCarData : carData,
+      sellerData: type === "seller" || type === "service" ? cleanedSellerData : sellerData,
+    };
     initialValuesRef.current = savedValues;
     snapshotRef.current = buildSnapshot(savedValues);
     setDirty(false);

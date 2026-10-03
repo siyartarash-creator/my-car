@@ -74,7 +74,7 @@ export function validateOwnerExtra(
 }
 
 export function validateSellerExtra(
-  sellerData: { experience?: string; warranty?: string } | null | undefined
+  sellerData: { experience?: string; warranty?: string; minOrder?: string } | null | undefined
 ): FieldErrors {
   const errors: FieldErrors = {};
   if (sellerData?.experience && !numberInRange(sellerData.experience, 0, 70)) {
@@ -82,6 +82,12 @@ export function validateSellerExtra(
   }
   if (sellerData?.warranty && !numberInRange(sellerData.warranty, 0, 120)) {
     errors.warranty = "گارانتی خدمات باید عددی بین ۰ تا ۱۲۰ ماه باشد";
+  }
+  // Generous sanity bound only — catches stray typos (e.g. an extra digit),
+  // not a real pricing policy. Chosen high enough that no legitimate
+  // pre-existing value should ever trip it.
+  if (sellerData?.minOrder && !numberInRange(sellerData.minOrder, 0, 10000000000)) {
+    errors.minOrder = "حداقل مبلغ سفارش باید عددی معتبر باشد";
   }
   return errors;
 }
@@ -105,7 +111,7 @@ export type ProfileFormState = {
   addressData: { province?: string; city?: string; street?: string; postal_code?: string } | null | undefined;
   contact: { phone1?: string; phone2?: string } | null | undefined;
   carData?: { mileage?: string; vin?: string; displayName?: string } | null | undefined;
-  sellerData?: { experience?: string; warranty?: string } | null | undefined;
+  sellerData?: { experience?: string; warranty?: string; minOrder?: string } | null | undefined;
   rescuerData?: { radius?: string; experience?: string } | null | undefined;
 };
 
