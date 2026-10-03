@@ -1,9 +1,19 @@
 # Seller Profile ↔ Store Cohesion Contract
 
-This documents the Seller Profile ↔ Store cohesion phase, built on top of
-`profile-completion-v1` (`62f0401`) on branch `seller-store-cohesion`. It does
-not reopen Profiles Phase 1 (`docs/profiles-phase-1-foundation.md`) and does
-not introduce a new Seller system, schema, or migration.
+This documents the Seller Profile ↔ Store cohesion phase, reconciled onto the
+authoritative Store baseline `phase-5-store-completion @
+020858ed40c84f1dedf92f076921ceab03a1e43f` on branch
+`phase-5-seller-store-cohesion`. It does not reopen Profiles Phase 1
+(`docs/profiles-phase-1-foundation.md`) and does not introduce a new Seller
+system or schema.
+
+This phase now includes the one small SQL migration that the app-only
+checkpoint (`d0df4c9`, see "Known limitation" below in its original form)
+deliberately deferred: `supabase/migrations/202610030000_seller_business_identity_snapshot.sql`
+updates the buyer-facing `save_offer`/`request_identity` snapshot source to
+the same shopName-with-fallback rule used on the seller's own dashboard. See
+"Offer integration" and "Product Request integration" below for the current
+state.
 
 ## Account Identity vs Seller Business Identity
 
@@ -58,28 +68,50 @@ Identity — these were left as-is deliberately.
 
 ## Offer integration (`save_offer`)
 
-`save_offer` (current definition in
-`supabase/migrations/202609300001_offer_timestamps.sql`) snapshots
-`profiles.name` into `product_sellers.seller_name` once, at offer creation
-(the insert branch only). No SQL/RPC change was made this phase — see "Known
-limitation" below.
+Authoritative `save_offer` source: `supabase/migrations/202609300004_discount_requests.sql`
+(the last migration in the Phase 4/5 chain that redefines the function;
+`202609300005`/`202609300006` only reference it in comments). Its Task 4.2A
+discount-threshold enforcement, above-threshold `discount_requests` routing,
+pending-request supersession, and price-change-ambiguous rejection are all
+preserved unchanged by `202610030000_seller_business_identity_snapshot.sql`,
+which changes only the `seller_name` snapshot source expression inside the
+INSERT branch:
+
+```sql
+select coalesce(nullif(regexp_replace(data->'seller'->>'shopName', '^[[:space:]]+|[[:space:]]+$', '', 'g'), ''), name)
+  into seller_name from public.profiles where id=auth.uid();
+```
+
+`profiles.data.seller.shopName` is used when it trims to a non-empty value
+(the POSIX `[:space:]` class covers spaces, tabs, newlines, carriage returns,
+and any mix of these — a shopName consisting only of such characters trims to
+`''`, which `nullif` maps to `null`, falling through to `profiles.name`).
+This is computed once, at offer creation (the INSERT branch only); the UPDATE
+branch never re-snapshots `seller_name`, so a seller changing their shopName
+later does not retroactively alter an existing Offer's stored name.
 
 ## Product Request integration (`request_identity` trigger)
 
-`private.request_identity()` (`supabase/migrations/202609290001_security_foundation.sql`)
-is a `BEFORE INSERT` trigger on `product_requests` that snapshots
-`profiles.name`/`profiles.mobile` into `seller_name`/`seller_mobile` at
-insert time, overwriting whatever the client sent. No SQL/RPC change was
-made this phase.
+`private.request_identity()` (originally defined in
+`supabase/migrations/202609290001_security_foundation.sql`, redefined by
+`202610030000_seller_business_identity_snapshot.sql`) is a `BEFORE INSERT`
+trigger on `product_requests` that snapshots the same shopName-with-fallback
+expression (above) plus `profiles.mobile` into `seller_name`/`seller_mobile`
+at insert time, overwriting whatever the client sent. `seller_mobile`'s
+source, the trigger's `SECURITY DEFINER` characteristics, and its grants are
+unchanged.
 
 ## Buyer/Admin/Seller display changes
 
 - **Seller** (own dashboard/header): now shows resolved Business Identity
   (this phase's change).
 - **Buyer** (`app/shop`, `app/shop/[slug]`, `ProductCard`, cart, orders):
-  unchanged — continues to read the `product_sellers.seller_name` /
-  `product_requests.seller_name` snapshot, which is sourced from `profiles.name`
-  (Account Identity) at write time, not `shopName`. See "Known limitation."
+  continues to read the `product_sellers.seller_name` /
+  `product_requests.seller_name` snapshot. As of
+  `202610030000_seller_business_identity_snapshot.sql`, *new* snapshots
+  prefer `shopName` (with the `profiles.name` fallback) over Account
+  Identity; snapshots taken before that migration remain on whatever they
+  were computed from at the time (see "Historical compatibility").
 - **Admin** (`app/admin/product-requests/page.tsx`): unchanged — continues to
   show the seller's Account Identity (`seller_name`/`seller_mobile`
   snapshot) for request verification. This is existing, intentional behavior
@@ -88,9 +120,13 @@ made this phase.
 ## Historical compatibility
 
 No backfill or rewrite of existing `product_sellers.seller_name` or
-`product_requests.seller_name`/`seller_mobile` rows was performed. Existing
-snapshot data remains valid historical data, per the no-migration/no-backfill
-constraint of this phase.
+`product_requests.seller_name`/`seller_mobile` rows was performed, and none
+is planned. Rows written before `202610030000_seller_business_identity_snapshot.sql`
+keep whatever name they were snapshotted with (`profiles.name`, since that
+was the only source available at the time); only rows inserted after that
+migration compute the shopName-with-fallback value. This is intentional:
+snapshots are point-in-time records of what was displayed, not a live view
+of the current profile.
 
 ## Privacy/Security
 
@@ -111,48 +147,40 @@ this phase's changes.
   `resolveSellerBusinessIdentity` treats a missing `data`/`data.seller` as
   "no shopName" and falls back to `profiles.name` — no crash on
   `undefined`/`null`.
-- Existing and new offers/requests: unaffected, since no SQL/RPC path was
-  changed.
+- Existing and new offers/requests: the 10 deterministic
+  `tests/database-security.mjs` cases for the new snapshot source (meaningful
+  shopName, missing, null, empty, spaces/tabs/newlines/CR/mixed-whitespace,
+  and old/partial `data.seller` shapes without `shopName`) pass, alongside
+  the full Phase 4/5 discount-threshold/request/approval regression suite
+  and `request_identity`/mobile/historical-row-immutability assertions — 318
+  assertions passing against both empty and pre-existing-data schema
+  fixtures, plus `tests/write-boundary.mjs` and `tests/profile-validation.mjs`.
+  `npm run typecheck`, scoped `eslint` on every changed file, and
+  `npm run build` all pass.
 
-## Known limitation (requires a future, separately authorized migration)
+## Resolved this phase: buyer-facing snapshot now sources `shopName`
 
-Buyer-facing and existing denormalized Store surfaces
-(`product_sellers.seller_name`, `product_requests.seller_name`) cannot be
-made to show the seller's chosen Business Identity (`shopName`) without
-either:
+The limitation documented in the app-only checkpoint (`d0df4c9`) — that
+buyer-facing `product_sellers.seller_name`/`product_requests.seller_name`
+snapshots could not show `shopName` without a migration — is resolved by
+`supabase/migrations/202610030000_seller_business_identity_snapshot.sql`
+(see "Offer integration" / "Product Request integration" above). No RLS
+change was needed: both `save_offer` and `request_identity()` already run
+`SECURITY DEFINER` with full `profiles` read access, so the shopName lookup
+happens server-side at snapshot time, not via a new cross-user read grant.
 
-1. Modifying the `save_offer` SQL function (and the `request_identity`
-   trigger) to snapshot `profiles.data.seller.shopName` with a
-   `profiles.name` fallback instead of `profiles.name` directly — this is a
-   change to an existing SQL function definition, which per this phase's
-   mandate requires a migration and is **not pre-authorized**; or
-2. Granting buyers/other sellers RLS read access to another user's
-   `profiles` row (even a narrow projection) to resolve `shopName` live —
-   this is an RLS/security change and a privacy-exposure decision, also
-   **not pre-authorized**.
-
-Per the mandate (no migration, no RLS change without explicit authorization,
-no backfill), this phase leaves buyer-facing identity on the existing
-`profiles.name`-sourced snapshot, which already satisfies the fallback rule
-(`shopName` → `profiles.name`, never blank) in the degenerate case where
-`shopName` was never consulted. This is a real, documented gap between the
-seller's intended shop identity and what buyers currently see — not a
-regression introduced by this phase.
-
-**Recommendation for a future phase:** update `save_offer`'s insert branch
-and `request_identity()` to call `resolveSellerBusinessIdentity`-equivalent
-logic in SQL (read `profiles.data->'seller'->>'shopName'` with a
-`profiles.name` fallback) when first creating a row. This requires one small,
-reviewable migration, no backfill, and no RLS change (both functions already
-run as `SECURITY DEFINER` with full `profiles` read access). Live resolution
-via RLS is not recommended — it would require exposing a cross-user Profile
-field query surface that does not currently exist.
+An earlier draft of this migration
+(`202610021000_seller_business_identity_snapshot.sql`, authored before the
+Phase 4 discount-request work landed and never applied to any shared
+environment) is superseded and must not be used: it was written against a
+pre-Phase-4 `save_offer` body and would have silently dropped the
+Task 4.2A/4.2B discount-threshold enforcement, `discount_requests` routing,
+and pending-request supersession if deployed.
 
 ## Deferred (explicitly out of scope, unchanged this phase)
 
-- Rewriting `save_offer` / `request_identity` to source `shopName` (see
-  above).
-- Any backfill of historical `seller_name`/`seller_mobile`.
+- Any backfill of historical `seller_name`/`seller_mobile` (see "Historical
+  compatibility").
 - Public Seller Profile, Seller verification, ratings/reviews, reputation,
   Profiles Phase 2, Marketplace redesign, payout/payment architecture.
 - `ProfileStatusCard.tsx`'s pre-existing inconsistency (it checks

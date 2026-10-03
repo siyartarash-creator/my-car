@@ -151,6 +151,81 @@ await as(seller,async()=>{
  await deny("insert into product_requests(seller_id,product_name,status) values(auth.uid(),'Request','approved')");
  await deny("insert into products(name,slug) values('Unauthorized','unauthorized')");
 });
+// Seller Business Identity: NEW product_sellers/product_requests snapshots prefer
+// profiles.data.seller.shopName (trimmed; all-whitespace treated as absent) over
+// the Account name profiles.name, which is never blank, as the deterministic
+// fallback. Historical rows and the Offer UPDATE branch stay untouched.
+// Fixture rows above were inserted with explicit ids, never advancing product_sellers_id_seq;
+// sync it so save_offer's nextval()-backed inserts below don't collide with those ids.
+await db.exec("select setval('product_sellers_id_seq', (select coalesce(max(id),0) from product_sellers))");
+const identityProductIds=[];
+for(let i=1;i<=11;i++) identityProductIds.push((await db.query(`insert into products(name,slug) values('Identity Part ${i}','identity-part-${i}') returning id`)).rows[0].id);
+await as(seller,async()=>{
+ let seq=0;
+ const setData=(obj)=>db.exec(`update profiles set data='${JSON.stringify(obj)}'::jsonb where id=auth.uid()`);
+ const newOfferSellerName=async()=>{
+  const pid=identityProductIds[seq++];
+  const offerId=(await db.query(`select public.save_offer(${pid},null,10000,null,1,null,null,null,false)`)).rows[0].save_offer;
+  return {offerId,name:(await db.query(`select seller_name from product_sellers where id=${offerId}`)).rows[0].seller_name};
+ };
+ // 1. missing shopName (data has no 'seller' key at all) -> Account name.
+ await setData({});
+ const missing=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${missing.offerId}`,'Seller');
+ // 2. meaningful shopName -> new Offers snapshot it.
+ await setData({seller:{shopName:'MY CAR Parts'}});
+ const meaningful=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${meaningful.offerId}`,'MY CAR Parts');
+ // Historical: the Offer created before shopName was set stays unchanged.
+ await check(`select seller_name from product_sellers where id=${missing.offerId}`,'Seller');
+ // UPDATE never re-snapshots seller_name, even though shopName is still set.
+ await db.exec(`select public.save_offer(${(await db.query(`select product_id from product_sellers where id=${meaningful.offerId}`)).rows[0].product_id},${meaningful.offerId},10000,null,2,null,null,null,false)`);
+ await check(`select seller_name from product_sellers where id=${meaningful.offerId}`,'MY CAR Parts');
+ // 3. null shopName -> Account name.
+ await setData({seller:{shopName:null}});
+ const nullCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${nullCase.offerId}`,'Seller');
+ // 4. empty string -> Account name.
+ await setData({seller:{shopName:''}});
+ const emptyCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${emptyCase.offerId}`,'Seller');
+ // 5. spaces-only -> Account name.
+ await setData({seller:{shopName:'   '}});
+ const spacesCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${spacesCase.offerId}`,'Seller');
+ // 6. tabs-only -> Account name.
+ await setData({seller:{shopName:'\t\t'}});
+ const tabsCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${tabsCase.offerId}`,'Seller');
+ // 7. newlines-only -> Account name.
+ await setData({seller:{shopName:'\n\n'}});
+ const newlinesCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${newlinesCase.offerId}`,'Seller');
+ // 8. carriage-return-only -> Account name.
+ await setData({seller:{shopName:'\r\r'}});
+ const crCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${crCase.offerId}`,'Seller');
+ // 9. mixed whitespace-only -> Account name.
+ await setData({seller:{shopName:' \t\n\r '}});
+ const mixedCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${mixedCase.offerId}`,'Seller');
+ // 10. old/partial Seller JSON shape (seller object present, no shopName key) -> Account name.
+ await setData({seller:{specialties:['x']}});
+ const partialCase=await newOfferSellerName();
+ await check(`select seller_name from product_sellers where id=${partialCase.offerId}`,'Seller');
+ // request_identity() uses the identical contract, including seller_mobile unaffected.
+ await setData({seller:{shopName:'MY CAR Parts'}});
+ await db.exec("insert into product_requests(seller_id,seller_name,product_name) values(auth.uid(),'Forged Name 2','Requested Part 2')");
+ await check("select seller_name from product_requests where product_name='Requested Part 2'",'MY CAR Parts');
+ await check("select seller_mobile from product_requests where product_name='Requested Part 2'",'09100000002');
+ await setData({seller:{shopName:'   '}});
+ await db.exec("insert into product_requests(seller_id,seller_name,product_name) values(auth.uid(),'Forged Name 3','Requested Part 3')");
+ await check("select seller_name from product_requests where product_name='Requested Part 3'",'Seller');
+ // Historical product_requests row from before shopName was ever set stays unchanged.
+ await check("select seller_name from product_requests where product_name='Requested Part'",'Seller');
+ // Reset so later tests in this run see the original no-shopName state.
+ await setData({});
+});
 // Phase 4 / Task 4.2A: above-threshold discount request foundation.
 // Fixture rows above were inserted with explicit ids, never advancing product_sellers_id_seq;
 // sync it so save_offer's nextval()-backed inserts below don't collide with those ids.
