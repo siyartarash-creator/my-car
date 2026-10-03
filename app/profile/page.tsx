@@ -25,6 +25,8 @@ import {
   isValid as isFormValid,
   type FieldErrors,
 } from "@/lib/profile-validation";
+import { getProfileCompleteness, type ProfileType } from "@/lib/profile-completeness";
+import { resolveSellerBusinessIdentity } from "@/lib/seller-identity";
 
 const fuelTypes = ["بنزین", "دوگانه‌سوز", "دیزل", "برقی", "هیبرید"];
 
@@ -707,6 +709,7 @@ function ProfileContent() {
   const [saveError, setSaveError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [userId, setUserId] = useState("");
+  const [accountName, setAccountName] = useState("");
   const [dirty, setDirty] = useState(false);
   const [confirmAction, setConfirmAction] = useState<null | "cancel" | "leave">(null);
 
@@ -766,6 +769,7 @@ function ProfileContent() {
       rescuerData: extra.rescuer || {},
     };
 
+    setAccountName(data.name || "");
     setAddressData(loaded.addressData);
     setContact(loaded.contact);
     setWorkingHours(loaded.workingHours);
@@ -892,6 +896,30 @@ function ProfileContent() {
   };
   const current = config[type] || config.owner;
 
+  const completeness = getProfileCompleteness(
+    {
+      address_data: addressData,
+      phone1: contact.phone1,
+      about,
+      working_hours: workingHours,
+      social_links: socialLinks,
+      data: { car: carData, seller: sellerData, serviceExpertise, carExpertise, rescuer: rescuerData },
+    },
+    type as ProfileType
+  );
+
+  const sellerIdentity =
+    type === "seller"
+      ? resolveSellerBusinessIdentity({
+          name: accountName,
+          phone1: contact.phone1,
+          phone2: contact.phone2,
+          about,
+          social_links: socialLinks,
+          data: { seller: sellerData },
+        })
+      : null;
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-gray-400">
@@ -936,6 +964,51 @@ function ProfileContent() {
           </h2>
           <p className="text-gray-400">اطلاعاتت رو کامل کن — هر وقت خواستی می‌تونی ویرایش کنی</p>
         </div>
+      </div>
+
+      <div className="mb-8 rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-5">
+        {sellerIdentity && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[#39FF14]/10 pb-4">
+            <span className="text-xs text-gray-400">نام فروشگاه در ویترین:</span>
+            <span className="rounded-full border border-[#39FF14]/40 bg-[#39FF14]/10 px-3 py-1 text-sm font-bold text-[#39FF14]">
+              {sellerIdentity.businessName}
+            </span>
+            {sellerIdentity.usedAccountNameFallback && (
+              <span className="text-xs text-yellow-400">
+                (نام فروشگاه تنظیم نشده — فعلاً از نام حساب استفاده می‌شود)
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold text-gray-300">میزان تکمیل پروفایل</span>
+          <span className={`text-sm font-bold ${completeness.percent === 100 ? "text-[#39FF14]" : "text-yellow-400"}`}>
+            {completeness.percent}٪
+          </span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-800">
+          <div
+            className={`h-full rounded-full transition-all ${completeness.percent === 100 ? "bg-[#39FF14]" : "bg-yellow-400"}`}
+            style={{ width: `${completeness.percent}%` }}
+          />
+        </div>
+        {completeness.missingRequired.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {completeness.missingRequired.map((m) => (
+              <span key={m.key} className="rounded-full border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-1 text-[10px] text-yellow-400">
+                {m.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-5 text-gray-500">
+          <span>🔒</span>
+          <span>
+            این اطلاعات فقط برای شما و مدیران سیستم قابل مشاهده است — شماره تماس، آدرس دقیق، پلاک و شماره شاسی هیچ‌وقت عمومی نمی‌شوند.
+          </span>
+        </p>
       </div>
 
       {saved && (

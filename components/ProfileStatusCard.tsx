@@ -4,61 +4,11 @@ import { getCurrentUserId } from "@/lib/auth-client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-
-type Profile = {
-  user_type: string | null;
-  avatar_type: string | null;
-  avatar_value: string | null;
-  address_data: {
-    province?: string;
-    city?: string;
-    street?: string;
-  } | null;
-  phone1: string | null;
-  data: {
-    car?: { brandId?: string; modelId?: string };
-    seller?: { shopName?: string; specialties?: string[] };
-    serviceExpertise?: string[];
-    rescuer?: { rescueTypes?: string[] };
-  } | null;
-};
-
-function getMissingFields(
-  profile: Profile,
-  userType: string
-): string[] {
-  const missing: string[] = [];
-
-  // آدرس
-  const addr = profile.address_data;
-  if (!addr?.province) missing.push("استان");
-  if (!addr?.city) missing.push("شهر");
-  if (!addr?.street) missing.push("خیابان");
-
-  // شماره تماس
-  if (!profile.phone1) missing.push("شماره تماس");
-
-  // مخصوص هر نوع کاربر
-  if (userType === "owner") {
-    if (!profile.data?.car?.brandId) missing.push("برند خودرو");
-    if (!profile.data?.car?.modelId) missing.push("مدل خودرو");
-  } else if (userType === "seller") {
-    if (!profile.data?.seller?.shopName) missing.push("نام فروشگاه");
-    if (!profile.data?.seller?.specialties?.length)
-      missing.push("حوزه تخصص");
-  } else if (userType === "service") {
-    if (!profile.data?.serviceExpertise?.length)
-      missing.push("نوع خدمات");
-  } else if (userType === "rescuer") {
-    if (!profile.data?.rescuer?.rescueTypes?.length)
-      missing.push("نوع امداد");
-  }
-
-  return missing;
-}
+import { getProfileCompleteness, type CompletenessProfile, type ProfileType } from "@/lib/profile-completeness";
 
 export function ProfileStatusCard() {
   const [loading, setLoading] = useState(true);
+  const [percent, setPercent] = useState(0);
   const [missing, setMissing] = useState<string[]>([]);
 
   useEffect(() => {
@@ -71,14 +21,16 @@ export function ProfileStatusCard() {
 
       const { data } = await supabase
         .from("profiles")
-        .select("user_type, avatar_type, avatar_value, address_data, phone1, data")
+        .select("user_type, address_data, phone1, about, working_hours, social_links, data")
         .eq("id", userId)
         .single();
 
       if (data) {
-        const p = data as Profile;
-        const type = p.user_type || "owner";
-        setMissing(getMissingFields(p, type));
+        const p = data as CompletenessProfile & { user_type: string | null };
+        const type = (p.user_type as ProfileType) || "owner";
+        const result = getProfileCompleteness(p, type);
+        setPercent(result.percent);
+        setMissing(result.missingRequired.map((m) => m.label));
       }
       setLoading(false);
     };
@@ -100,7 +52,7 @@ export function ProfileStatusCard() {
               پروفایل شما کامل است
             </p>
             <p className="text-xs text-gray-400">
-              همه خدمات ماشین من برات فعاله
+              {percent < 100 ? `${percent}٪ تکمیل — بخش‌های اصلی کامل‌اند` : "همه خدمات ماشین من برات فعاله"}
             </p>
           </div>
         </div>
@@ -121,9 +73,14 @@ export function ProfileStatusCard() {
         <div className="flex items-start gap-3">
           <span className="text-2xl">⚠️</span>
           <div className="min-w-0 flex-1">
-            <p className="font-bold text-yellow-400">
-              پروفایل شما کامل نیست
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="font-bold text-yellow-400">
+                پروفایل شما کامل نیست
+              </p>
+              <span className="rounded-full border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[10px] font-bold text-yellow-400">
+                {percent}٪
+              </span>
+            </div>
             <p className="mt-1 text-sm text-gray-400">
               برای استفاده از همه خدمات، اینا رو تکمیل کن:
             </p>
