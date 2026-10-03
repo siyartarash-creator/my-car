@@ -78,6 +78,27 @@ function FieldError({ error }: { error?: string }) {
   return <p className="mt-1.5 text-xs text-red-400">⚠ {error}</p>;
 }
 
+// Groups related cards into a labeled chapter so a long form reads as
+// distinct sections (identity / contact / role details / media / optional)
+// instead of one undifferentiated list.
+function GroupHeading({ icon, title, hint }: { icon: string; title: string; hint?: string }) {
+  return (
+    <div className="mb-1 mt-10 flex items-baseline gap-2 border-b border-[#39FF14]/15 pb-2 first:mt-0">
+      <span className="text-lg">{icon}</span>
+      <h3 className="text-sm font-bold tracking-wide text-gray-200">{title}</h3>
+      {hint && <span className="text-xs text-gray-500">{hint}</span>}
+    </div>
+  );
+}
+
+function PrivateBadge() {
+  return (
+    <span className="mr-1 inline-flex items-center gap-0.5 rounded-full bg-neutral-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+      🔒 خصوصی
+    </span>
+  );
+}
+
 function TextInput({ label, value, onChange, placeholder, optional, hint, star, ltr, maxLength, digitsOnly, error }: any) {
   return (
     <div>
@@ -122,7 +143,7 @@ function ChipSelector({ options, value, onChange }: { options: string[]; value: 
           key={opt}
           type="button"
           onClick={() => onChange(opt)}
-          className={`rounded-full border px-4 py-2 text-sm transition ${
+          className={`rounded-full border px-4 py-2.5 text-sm transition ${
             value === opt
               ? "border-[#39FF14] bg-[#39FF14] font-bold text-black shadow-[0_0_15px_rgba(57,255,20,0.5)]"
               : "border-[#39FF14]/20 text-gray-300 hover:border-[#39FF14]/60"
@@ -145,7 +166,7 @@ function MultiChipSelector({ options, values, onToggle }: { options: string[]; v
             key={opt}
             type="button"
             onClick={() => onToggle(opt)}
-            className={`rounded-full border px-4 py-2 text-sm transition ${
+            className={`rounded-full border px-4 py-2.5 text-sm transition ${
               active
                 ? "border-[#39FF14] bg-[#39FF14] font-bold text-black shadow-[0_0_15px_rgba(57,255,20,0.5)]"
                 : "border-[#39FF14]/20 text-gray-300 hover:border-[#39FF14]/60"
@@ -202,8 +223,8 @@ function WorkingHours({ value, onChange }: any) {
           {weekDays.map((day) => {
             const d = hours[day] || { open: "09:00", close: "19:00", closed: false };
             return (
-              <div key={day} className="flex items-center gap-3 rounded-lg border border-[#39FF14]/10 bg-neutral-950/50 px-3 py-2">
-                <button type="button" onClick={() => toggleDay(day)} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 ${!d.closed ? "border-[#39FF14] bg-[#39FF14] text-black" : "border-[#39FF14]/40"}`}>
+              <div key={day} className="flex items-center gap-3 rounded-lg border border-[#39FF14]/10 bg-neutral-950/50 px-3 py-2.5">
+                <button type="button" onClick={() => toggleDay(day)} aria-label={d.closed ? `${day} تعطیل است، برای باز کردن بزنید` : `${day} باز است، برای تعطیل کردن بزنید`} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 ${!d.closed ? "border-[#39FF14] bg-[#39FF14] text-black" : "border-[#39FF14]/40"}`}>
                   {!d.closed && <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M20 6 9 17l-5-5" /></svg>}
                 </button>
                 <span className="w-20 text-sm text-gray-200">{day}</span>
@@ -342,8 +363,8 @@ function CarSelector({ value, onChange, errors }: any) {
             </div>
           )}
           <div className="grid gap-4 md:grid-cols-2">
-            <TextInput label="شماره پلاک" value={v.plate || ""} onChange={(val: string) => set("plate", val)} placeholder="۱۲ الف ۳۴۵ ایران ۱۱" optional />
-            <TextInput label="شماره شاسی (VIN)" value={v.vin || ""} onChange={(val: string) => set("vin", val)} placeholder="17 کاراکتر" optional ltr maxLength={17} error={e.vin} />
+            <TextInput label={<>شماره پلاک <PrivateBadge /></>} value={v.plate || ""} onChange={(val: string) => set("plate", val)} placeholder="۱۲ الف ۳۴۵ ایران ۱۱" optional />
+            <TextInput label={<>شماره شاسی (VIN) <PrivateBadge /></>} value={v.vin || ""} onChange={(val: string) => set("vin", val)} placeholder="17 کاراکتر" optional ltr maxLength={17} error={e.vin} />
           </div>
         </div>
       )}
@@ -538,25 +559,31 @@ function OwnerForm({ carData, setCarData, addressData, setAddressData, contact, 
   const v = carData || {};
   return (
     <>
+      <GroupHeading icon="🚗" title="خودروی شما" />
       <CarSelector value={carData} onChange={setCarData} errors={e} />
 
-      <TextInput
-        label="نام دلخواه خودرو"
-        value={v.displayName || ""}
-        onChange={(val: string) => setCarData({ ...v, displayName: val })}
-        placeholder="مثلاً ماشین شخصی"
-        optional
-        maxLength={40}
-        error={e.displayName}
-      />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <h3 className="mb-5 text-base font-bold text-[#39FF14]">🏷️ نام و تصویر خودرو</h3>
+        <div className="space-y-4">
+          <TextInput
+            label="نام دلخواه خودرو"
+            value={v.displayName || ""}
+            onChange={(val: string) => setCarData({ ...v, displayName: val })}
+            placeholder="مثلاً ماشین شخصی"
+            optional
+            maxLength={40}
+            error={e.displayName}
+          />
+          <SingleImagePicker
+            label="📷 عکس خودرو"
+            filePrefix="vehicle"
+            value={v.photoUrl}
+            onChange={(url) => setCarData({ ...v, photoUrl: url })}
+          />
+        </div>
+      </div>
 
-      <SingleImagePicker
-        label="📷 عکس خودرو"
-        filePrefix="vehicle"
-        value={v.photoUrl}
-        onChange={(url) => setCarData({ ...v, photoUrl: url })}
-      />
-
+      <GroupHeading icon="📍" title="تماس و آدرس" hint="(خصوصی)" />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
@@ -570,35 +597,41 @@ function SellerForm({ sellerData, setSellerData, addressData, setAddressData, co
   const e = errors || {};
   return (
     <>
-      <TextInput label="نام فروشگاه" value={sellerData.shopName || ""} onChange={(v: string) => setSellerData({ ...sellerData, shopName: v })} placeholder="مثلاً فروشگاه برق خودرو مهدی" />
+      <GroupHeading icon="🏷️" title="هویت فروشگاه" />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <h3 className="mb-5 text-base font-bold text-[#39FF14]">🏷️ نام فروشگاه</h3>
+        <TextInput label="نام فروشگاه" value={sellerData.shopName || ""} onChange={(v: string) => setSellerData({ ...sellerData, shopName: v })} placeholder="مثلاً فروشگاه برق خودرو مهدی" hint="همین نام در ویترین فروشگاه به مشتریان نمایش داده می‌شود" />
+      </div>
 
+      <GroupHeading icon="📍" title="تماس و آدرس" hint="(خصوصی)" />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس فروشگاه</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
-
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
       <ContactInfo value={contact} onChange={setContact} errors={e} />
 
-      <div>
-        <SectionTitle>حوزه تخصص (چند انتخابی)</SectionTitle>
-        <MultiChipSelector options={sellerSpecialties} values={sellerData.specialties || []} onToggle={(s: string) => {
-          const prev = sellerData.specialties || [];
-          setSellerData({ ...sellerData, specialties: prev.includes(s) ? prev.filter((x: string) => x !== s) : [...prev, s] });
-        }} />
+      <GroupHeading icon="🧰" title="تخصص و نوع فروش" />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <div className="mb-6">
+          <SectionTitle>حوزه تخصص (چند انتخابی)</SectionTitle>
+          <MultiChipSelector options={sellerSpecialties} values={sellerData.specialties || []} onToggle={(s: string) => {
+            const prev = sellerData.specialties || [];
+            setSellerData({ ...sellerData, specialties: prev.includes(s) ? prev.filter((x: string) => x !== s) : [...prev, s] });
+          }} />
+        </div>
+        <div>
+          <SectionTitle>نوع فروش</SectionTitle>
+          <ChipSelector options={sellerTypes} value={sellerData.saleType || ""} onChange={(v: string) => setSellerData({ ...sellerData, saleType: v })} />
+        </div>
       </div>
-
-      <div>
-        <SectionTitle>نوع فروش</SectionTitle>
-        <ChipSelector options={sellerTypes} value={sellerData.saleType || ""} onChange={(v: string) => setSellerData({ ...sellerData, saleType: v })} />
-      </div>
-
-      <TextInput label="حداقل مبلغ سفارش (تومان)" value={sellerData.minOrder || ""} onChange={(v: string) => setSellerData({ ...sellerData, minOrder: v })} placeholder="مثلاً 500000" optional ltr digitsOnly hint="خالی بگذارید = بدون محدودیت" />
-
       <CarExpertiseSelector value={carExpertise} onChange={setCarExpertise} />
 
+      <GroupHeading icon="✨" title="جزئیات تکمیلی" hint="(اختیاری)" />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <TextInput label="حداقل مبلغ سفارش (تومان)" value={sellerData.minOrder || ""} onChange={(v: string) => setSellerData({ ...sellerData, minOrder: v })} placeholder="مثلاً 500000" optional ltr digitsOnly hint="خالی بگذارید = بدون محدودیت" />
+      </div>
       <TextArea label="درباره فروشگاه" value={about} onChange={setAbout} placeholder="معرفی کوتاه" optional />
-
       <SocialLinks value={socialLinks} onChange={setSocialLinks} />
     </>
   );
@@ -608,47 +641,54 @@ function ServiceForm({ sellerData, setSellerData, addressData, setAddressData, c
   const e = errors || {};
   return (
     <>
-      <TextInput
-        label="نام تعمیرگاه یا مجتمع"
-        value={sellerData.shopName || ""}
-        onChange={(v: string) => setSellerData({ ...sellerData, shopName: v })}
-        placeholder="نام کارگاه"
-        optional
-      />
+      <GroupHeading icon="🏷️" title="هویت کسب‌وکار" />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <div className="space-y-4">
+          <TextInput
+            label="نام تعمیرگاه یا مجتمع"
+            value={sellerData.shopName || ""}
+            onChange={(v: string) => setSellerData({ ...sellerData, shopName: v })}
+            placeholder="نام کارگاه"
+            optional
+          />
+          <SingleImagePicker
+            label="📷 عکس تعمیرگاه/مجموعه"
+            filePrefix="business"
+            value={sellerData.photoUrl}
+            onChange={(url) => setSellerData({ ...sellerData, photoUrl: url })}
+          />
+        </div>
+      </div>
 
+      <GroupHeading icon="📍" title="تماس و آدرس" hint="(خصوصی)" />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس محل کار</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
-
-      <SingleImagePicker
-        label="📷 عکس تعمیرگاه/مجموعه"
-        filePrefix="business"
-        value={sellerData.photoUrl}
-        onChange={(url) => setSellerData({ ...sellerData, photoUrl: url })}
-      />
-
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
       <ContactInfo value={contact} onChange={setContact} errors={e} />
 
+      <GroupHeading icon="🧰" title="تخصص و سابقه" />
       <ServiceExpertiseSelector value={serviceExpertise} onChange={setServiceExpertise} />
-
       <CarExpertiseSelector value={carExpertise} onChange={setCarExpertise} />
 
-      <TextInput label="سال سابقه کار" value={sellerData.experience || ""} onChange={(v: string) => setSellerData({ ...sellerData, experience: v })} placeholder="مثلاً 15" ltr maxLength={2} digitsOnly error={e.experience} />
-
-      <TextInput label="گارانتی خدمات (ماه)" value={sellerData.warranty || ""} onChange={(v: string) => setSellerData({ ...sellerData, warranty: v })} placeholder="مثلاً 6" optional ltr maxLength={2} digitsOnly error={e.warranty} />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextInput label="سال سابقه کار" value={sellerData.experience || ""} onChange={(v: string) => setSellerData({ ...sellerData, experience: v })} placeholder="مثلاً 15" ltr maxLength={2} digitsOnly error={e.experience} />
+          <TextInput label="گارانتی خدمات (ماه)" value={sellerData.warranty || ""} onChange={(v: string) => setSellerData({ ...sellerData, warranty: v })} placeholder="مثلاً 6" optional ltr maxLength={2} digitsOnly error={e.warranty} />
+        </div>
+      </div>
 
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-4 text-base font-bold text-[#39FF14]">🚙 خدمات سیار</h3>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-200">
-          <input type="checkbox" checked={sellerData.mobileService || false} onChange={(e) => setSellerData({ ...sellerData, mobileService: e.target.checked })} className="h-4 w-4 accent-[#39FF14]" />
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-gray-200">
+          <input type="checkbox" checked={sellerData.mobileService || false} onChange={(e) => setSellerData({ ...sellerData, mobileService: e.target.checked })} className="h-5 w-5 accent-[#39FF14]" />
           ارائه خدمات در محل مشتری
         </label>
       </div>
 
+      <GroupHeading icon="✨" title="جزئیات تکمیلی" hint="(اختیاری)" />
       <TextArea label="درباره من / مجموعه" value={about} onChange={setAbout} placeholder="تخصص‌ها، سابقه، نمونه کار" optional />
-
       <SocialLinks value={socialLinks} onChange={setSocialLinks} />
     </>
   );
@@ -658,33 +698,35 @@ function RescuerForm({ rescuerData, setRescuerData, addressData, setAddressData,
   const e = errors || {};
   return (
     <>
+      <GroupHeading icon="📍" title="منطقه، تماس و ساعات فعالیت" hint="(خصوصی)" />
       <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
         <h3 className="mb-5 text-base font-bold text-[#39FF14]">📍 آدرس / منطقه فعالیت</h3>
         <AddressForm value={addressData} onChange={setAddressData} errors={e} />
       </div>
-
       <WorkingHours value={workingHours} onChange={setWorkingHours} />
       <ContactInfo value={contact} onChange={setContact} errors={e} />
 
-      <div>
-        <SectionTitle>نوع امداد (چند انتخابی)</SectionTitle>
-        <MultiChipSelector options={rescueTypes} values={rescuerData.rescueTypes || []} onToggle={(s: string) => {
-          const prev = rescuerData.rescueTypes || [];
-          setRescuerData({ ...rescuerData, rescueTypes: prev.includes(s) ? prev.filter((x: string) => x !== s) : [...prev, s] });
-        }} />
+      <GroupHeading icon="🚨" title="نوع و پوشش امداد" />
+      <div className="rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-6">
+        <div className="mb-6">
+          <SectionTitle>نوع امداد (چند انتخابی)</SectionTitle>
+          <MultiChipSelector options={rescueTypes} values={rescuerData.rescueTypes || []} onToggle={(s: string) => {
+            const prev = rescuerData.rescueTypes || [];
+            setRescuerData({ ...rescuerData, rescueTypes: prev.includes(s) ? prev.filter((x: string) => x !== s) : [...prev, s] });
+          }} />
+        </div>
+        <div className="mb-6">
+          <SectionTitle>وسیله نقلیه امداد</SectionTitle>
+          <ChipSelector options={rescueVehicles} value={rescuerData.vehicle || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, vehicle: v })} />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextInput label="شعاع سرویس‌دهی (کیلومتر)" value={rescuerData.radius || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, radius: v })} placeholder="مثلاً 30" ltr maxLength={3} digitsOnly error={e.radius} />
+          <TextInput label="سال سابقه امدادگری" value={rescuerData.experience || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, experience: v })} placeholder="مثلاً 5" ltr maxLength={2} digitsOnly error={e.experience} />
+        </div>
       </div>
 
-      <div>
-        <SectionTitle>وسیله نقلیه امداد</SectionTitle>
-        <ChipSelector options={rescueVehicles} value={rescuerData.vehicle || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, vehicle: v })} />
-      </div>
-
-      <TextInput label="شعاع سرویس‌دهی (کیلومتر)" value={rescuerData.radius || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, radius: v })} placeholder="مثلاً 30" ltr maxLength={3} digitsOnly error={e.radius} />
-
-      <TextInput label="سال سابقه امدادگری" value={rescuerData.experience || ""} onChange={(v: string) => setRescuerData({ ...rescuerData, experience: v })} placeholder="مثلاً 5" ltr maxLength={2} digitsOnly error={e.experience} />
-
+      <GroupHeading icon="✨" title="جزئیات تکمیلی" hint="(اختیاری)" />
       <TextArea label="درباره من" value={about} onChange={setAbout} placeholder="معرفی کوتاه" optional />
-
       <SocialLinks value={socialLinks} onChange={setSocialLinks} />
     </>
   );
@@ -922,8 +964,9 @@ function ProfileContent() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center text-gray-400">
-        در حال بارگذاری پروفایل...
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-gray-400">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#39FF14]/20 border-t-[#39FF14]" />
+        <span>در حال بارگذاری پروفایل...</span>
       </div>
     );
   }
@@ -964,6 +1007,10 @@ function ProfileContent() {
           </h2>
           <p className="text-gray-400">اطلاعاتت رو کامل کن — هر وقت خواستی می‌تونی ویرایش کنی</p>
         </div>
+      </div>
+
+      <div className="mb-6">
+        <AvatarPicker />
       </div>
 
       <div className="mb-8 rounded-2xl border border-[#39FF14]/20 bg-neutral-900/40 p-5">
@@ -1049,36 +1096,36 @@ function ProfileContent() {
         </div>
       )}
 
-      <div className="mb-8">
-        <AvatarPicker />
-      </div>
-
-      <form onSubmit={handleSave} className="space-y-6">
+      <form onSubmit={handleSave} className="space-y-6 pb-28 sm:pb-0">
         {type === "owner" && <OwnerForm carData={carData} setCarData={setCarData} {...formProps} />}
         {type === "seller" && <SellerForm sellerData={sellerData} setSellerData={setSellerData} carExpertise={carExpertise} setCarExpertise={setCarExpertise} {...formProps} />}
         {type === "service" && <ServiceForm sellerData={sellerData} setSellerData={setSellerData} carExpertise={carExpertise} setCarExpertise={setCarExpertise} serviceExpertise={serviceExpertise} setServiceExpertise={setServiceExpertise} {...formProps} />}
         {type === "rescuer" && <RescuerForm rescuerData={rescuerData} setRescuerData={setRescuerData} {...formProps} />}
 
-        <button type="submit" disabled={saving} className="w-full rounded-lg bg-[#39FF14] px-8 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/80 hover:shadow-[0_0_30px_rgba(57,255,20,0.8)] disabled:cursor-not-allowed disabled:opacity-50">
-          {saving ? "در حال ذخیره..." : "ذخیره اطلاعات"}
-        </button>
+        <div className="sticky bottom-0 -mx-6 space-y-3 border-t border-[#39FF14]/20 bg-neutral-950/95 px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur sm:static sm:-mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-6 sm:backdrop-blur-none">
+          <button type="submit" disabled={saving} className="w-full rounded-lg bg-[#39FF14] px-8 py-3 font-bold text-black shadow-[0_0_20px_rgba(57,255,20,0.5)] transition hover:bg-[#39FF14]/80 hover:shadow-[0_0_30px_rgba(57,255,20,0.8)] disabled:cursor-not-allowed disabled:opacity-50">
+            {saving ? "⏳ در حال ذخیره..." : dirty ? "ذخیره تغییرات" : "ذخیره اطلاعات"}
+          </button>
 
-        <button
-          type="button"
-          onClick={requestCancel}
-          disabled={!dirty}
-          className="w-full rounded-lg border border-yellow-500/30 px-8 py-3 text-center font-bold text-yellow-400 transition hover:bg-yellow-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          انصراف از تغییرات
-        </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={requestCancel}
+              disabled={!dirty}
+              className="flex-1 rounded-lg border border-yellow-500/30 px-4 py-3 text-center text-sm font-bold text-yellow-400 transition hover:bg-yellow-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              انصراف از تغییرات
+            </button>
 
-        <button
-          type="button"
-          onClick={requestLeave}
-          className="block w-full rounded-lg border border-[#39FF14]/30 px-8 py-3 text-center font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
-        >
-          برگشت به پنل کاربری
-        </button>
+            <button
+              type="button"
+              onClick={requestLeave}
+              className="flex-1 rounded-lg border border-[#39FF14]/30 px-4 py-3 text-center text-sm font-bold text-[#39FF14] transition hover:bg-[#39FF14]/10"
+            >
+              برگشت به پنل کاربری
+            </button>
+          </div>
+        </div>
       </form>
     </section>
   );

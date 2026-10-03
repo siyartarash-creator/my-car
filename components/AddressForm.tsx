@@ -73,6 +73,11 @@ export function AddressForm({
 
   return (
     <div className="space-y-4">
+      <p className="flex items-start gap-1.5 text-[11px] leading-5 text-gray-500">
+        <span>🔒</span>
+        <span>آدرس دقیق شما خصوصی است و فقط برای خودتان و مدیران سیستم نمایش داده می‌شود.</span>
+      </p>
+
       {/* استان + شهر */}
       <div className="grid gap-4 md:grid-cols-2">
         <div>
