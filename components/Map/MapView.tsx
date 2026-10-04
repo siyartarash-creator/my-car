@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { Map as MapLibreMap, Marker, MapMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -119,21 +120,6 @@ export default function MapView({ categories }: { categories: Category[] }) {
     return () => { cancelled = true; };
   }, [routePoints]);
 
-  // Debounced place search (OSM Nominatim via /api/map/geocode). Loading
-  // state is set in handleSearchChange (a plain event handler) rather than
-  // here, so nothing calls setState synchronously at the top of an effect.
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (q.length < 2) return;
-    const timer = setTimeout(() => {
-      searchPlaces(q)
-        .then((res) => setSearchResults(res.status === "ok" ? res.data : []))
-        .catch(() => setSearchResults([]))
-        .finally(() => setSearchLoading(false));
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
   // Draw/update the route line as a GeoJSON source+layer once the map is ready.
   useEffect(() => {
     const map = mapRef.current;
@@ -213,10 +199,24 @@ export default function MapView({ categories }: { categories: Category[] }) {
     );
   }, [loadNearby]);
 
+  // Search runs only on explicit submission (Enter / the search button) --
+  // never on keystroke/type-ahead, both to respect Nominatim's usage
+  // policy (no bulk/automated-feeling query volume) and so a half-typed
+  // query never fires a request.
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    if (value.trim().length < 2) { setSearchResults([]); setSearchLoading(false); }
-    else setSearchLoading(true);
+    if (value.trim().length < 2) setSearchResults([]);
+  };
+
+  const handleSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    searchPlaces(q)
+      .then((res) => setSearchResults(res.status === "ok" ? res.data : []))
+      .catch(() => setSearchResults([]))
+      .finally(() => setSearchLoading(false));
   };
 
   const selectSearchResult = (result: GeocodeResult) => {
@@ -268,28 +268,49 @@ export default function MapView({ categories }: { categories: Category[] }) {
       )}
 
       <div className="absolute left-1/2 top-4 z-30 w-[min(320px,70vw)] -translate-x-1/2">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="جستجوی مکان..."
-          dir="rtl"
-          className="w-full rounded-full border border-[#39FF14]/30 bg-neutral-950/90 px-4 py-2 text-sm text-gray-100 shadow backdrop-blur outline-none focus:border-[#39FF14]"
-        />
+        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="جستجوی مکان..."
+            dir="rtl"
+            className="w-full rounded-full border border-[#39FF14]/30 bg-neutral-950/90 px-4 py-2 text-sm text-gray-100 shadow backdrop-blur outline-none focus:border-[#39FF14]"
+          />
+          <button
+            type="submit"
+            aria-label="جستجو"
+            className="shrink-0 rounded-full border border-[#39FF14]/30 bg-neutral-950/90 px-4 py-2 text-sm font-bold text-[#39FF14] shadow backdrop-blur hover:bg-[#39FF14]/10"
+          >
+            جستجو
+          </button>
+        </form>
         {(searchLoading || searchResults.length > 0) && (
-          <div className="mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#39FF14]/20 bg-neutral-950/95 text-sm text-gray-200 shadow-xl backdrop-blur">
-            {searchLoading ? (
-              <p className="p-3 text-gray-400">در حال جستجو...</p>
-            ) : (
-              searchResults.map((r, i) => (
-                <button
-                  key={i}
-                  onClick={() => selectSearchResult(r)}
-                  className="block w-full truncate px-3 py-2 text-right hover:bg-[#39FF14]/10"
-                >
-                  {r.label}
-                </button>
-              ))
+          <div className="mt-1 overflow-hidden rounded-xl border border-[#39FF14]/20 bg-neutral-950/95 text-sm text-gray-200 shadow-xl backdrop-blur">
+            <div className="max-h-60 overflow-y-auto">
+              {searchLoading ? (
+                <p className="p-3 text-gray-400">در حال جستجو...</p>
+              ) : (
+                searchResults.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectSearchResult(r)}
+                    className="block w-full truncate px-3 py-2 text-right hover:bg-[#39FF14]/10"
+                  >
+                    {r.label}
+                  </button>
+                ))
+              )}
+            </div>
+            {!searchLoading && searchResults.length > 0 && (
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block border-t border-[#39FF14]/10 px-3 py-1.5 text-left text-xs text-gray-500 hover:text-[#39FF14]"
+              >
+                نتایج جستجو از © OpenStreetMap contributors
+              </a>
             )}
           </div>
         )}

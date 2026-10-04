@@ -13,7 +13,10 @@ import type { GeocodeResult, GeocodingPort } from "../ports";
 // request/sec" throttling -- this adapter itself makes exactly one request
 // per call and leaves rate limiting to its caller.
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
-const USER_AGENT = "MyCarMap/1.0 (Phase 2 Map search; contact via the MY CAR project repository)";
+// Concrete, identifying server-side User-Agent per Nominatim's usage
+// policy (https://operations.osmfoundation.org/policies/nominatim/):
+// application name/version + a URL that identifies the operator/project.
+const USER_AGENT = "MyCarMap/1.0 (+https://github.com/siyartarash-creator/my-car)";
 
 type NominatimRow = { display_name: string; lat: string; lon: string };
 
