@@ -14,9 +14,22 @@ if (typeof window !== "undefined") {
   maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
 }
 import { supabase } from "@/lib/supabase";
-import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, findRoadEvents, previewRoute, searchPlaces, submitCommunityReport } from "@/lib/map/ai-contracts";
+import {
+  getTileStyle,
+  getNearbyFeatures,
+  getNearbyServiceLocations,
+  findRoadEvents,
+  findServicesAlongRoute,
+  createLocationShare,
+  revokeLocationShare,
+  previewRoute,
+  searchPlaces,
+  submitCommunityReport,
+} from "@/lib/map/ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
 import type { GeocodeResult, RoutePreview, VehicleType } from "@/lib/map/ports";
+import { NavigationSession } from "@/lib/map/navigation";
+import type { NavigationState } from "@/lib/map/navigation";
 
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
@@ -39,9 +52,12 @@ type Category = { id: number; slug: string; name_fa: string; icon: string | null
 const TEHRAN_CENTER: LatLng = { lat: 35.6997, lng: 51.338 };
 const SEARCH_RADIUS_METERS = 25_000;
 
-// This project does not log or persist a trail -- only the current map
-// center/marker set lives in component state, and Locate Me calls
-// getCurrentPosition once (no watchPosition / background tracking).
+// No background/silent tracking anywhere in this component: Locate Me
+// calls getCurrentPosition once, and live navigation's watchPosition only
+// runs between an explicit "start" and "stop" click (never persisted --
+// see lib/map/navigation.ts). The one thing that IS persisted is the
+// roadside location share, and only on an explicit "درخواست کمک" click
+// (default off, revocable, short TTL -- see createLocationShare).
 export default function MapView({ categories }: { categories: Category[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -66,6 +82,18 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [searchResults, setSearchResults] = useState<GeocodeResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const categoryById = Object.fromEntries(categories.map((c) => [c.id, c]));
+
+  // --- Phase 3 Part 3: live navigation (foreground only) -----------------
+  const navSessionRef = useRef<NavigationSession | null>(null);
+  const [navState, setNavState] = useState<NavigationState | null>(null);
+
+  // --- Phase 3 Part 3: services along the active route -------------------
+  const [routeServices, setRouteServices] = useState<MapServiceLocation[] | null>(null);
+  const [routeServicesLoading, setRouteServicesLoading] = useState(false);
+
+  // --- Phase 3 Part 3: roadside location handoff (opt-in, default off) ---
+  const [roadsideShareId, setRoadsideShareId] = useState<number | null>(null);
+  const [roadsideStatus, setRoadsideStatus] = useState<"idle" | "sharing" | "shared" | "error">("idle");
 
   const loadNearby = useCallback(async (center: LatLng) => {
     try {
@@ -187,6 +215,14 @@ export default function MapView({ categories }: { categories: Category[] }) {
       markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map));
     });
 
+    if (navState?.currentPosition) {
+      const el = document.createElement("div");
+      el.style.cssText = "width:16px;height:16px;border-radius:50%;background:#2196f3;border:3px solid #ffffff;box-shadow:0 0 8px #2196f3;";
+      markersRef.current.push(
+        new maplibregl.Marker({ element: el }).setLngLat([navState.currentPosition.lng, navState.currentPosition.lat]).addTo(map),
+      );
+    }
+
     for (const feature of features) {
       if (!activeCategoryIds.has(feature.categoryId)) continue;
       const cat = categoryById[feature.categoryId];
@@ -207,7 +243,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
         .addTo(map);
       markersRef.current.push(marker);
     }
-  }, [services, features, activeCategoryIds, categoryById, routePoints, roadEventSeverityById]);
+  }, [services, features, activeCategoryIds, categoryById, routePoints, roadEventSeverityById, navState]);
 
   const handleLocateMe = useCallback(() => {
     if (!navigator.geolocation) {
@@ -272,6 +308,76 @@ export default function MapView({ categories }: { categories: Category[] }) {
       setReportStatus("error");
     }
   };
+
+  // --- Phase 3 Part 3: live navigation ------------------------------------
+  const startNavigation = useCallback(() => {
+    if (!routeResult) return;
+    navSessionRef.current?.stop();
+    const session = new NavigationSession(routeResult, setNavState);
+    navSessionRef.current = session;
+    setNavState(session.getState());
+    session.start();
+  }, [routeResult]);
+
+  const stopNavigation = useCallback(() => {
+    navSessionRef.current?.stop();
+    navSessionRef.current = null;
+    setNavState(null);
+  }, []);
+
+  useEffect(() => () => { navSessionRef.current?.stop(); }, []); // stop watchPosition on unmount, never leave it running
+
+  // --- Phase 3 Part 3: services along the active route --------------------
+  const handleFindServicesAlongRoute = useCallback(async () => {
+    if (!routeResult) return;
+    setRouteServicesLoading(true);
+    try {
+      const points: LatLng[] = routeResult.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+      const res = await findServicesAlongRoute(supabase, points, 5_000);
+      setRouteServices(res.status === "ok" ? res.data : []);
+    } catch {
+      setRouteServices([]);
+    } finally {
+      setRouteServicesLoading(false);
+    }
+  }, [routeResult]);
+
+  // --- Phase 3 Part 3: roadside location handoff (explicit opt-in only) --
+  const handleRequestRoadsideHelp = useCallback(() => {
+    if (!navigator.geolocation) {
+      setErrorMessage("مرورگر شما از موقعیت‌یابی پشتیبانی نمی‌کند.");
+      return;
+    }
+    setRoadsideStatus("sharing");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const id = await createLocationShare(
+            supabase,
+            { lat: pos.coords.latitude, lng: pos.coords.longitude },
+            "roadside_breakdown",
+            120,
+          );
+          setRoadsideShareId(id);
+          setRoadsideStatus("shared");
+        } catch {
+          setRoadsideStatus("error");
+        }
+      },
+      () => setRoadsideStatus("error"),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
+    );
+  }, []);
+
+  const handleCancelRoadsideShare = useCallback(async () => {
+    if (roadsideShareId == null) return;
+    try {
+      await revokeLocationShare(supabase, roadsideShareId);
+    } finally {
+      setRoadsideShareId(null);
+      setRoadsideStatus("idle");
+    }
+  }, [roadsideShareId]);
 
   return (
     <div className="relative h-[calc(100vh-88px)] w-full">
@@ -366,6 +472,8 @@ export default function MapView({ categories }: { categories: Category[] }) {
             setMode((m) => (m === "route" ? "none" : "route"));
             setRoutePoints([]);
             setReportDraft(null);
+            stopNavigation();
+            setRouteServices(null);
           }}
           className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur ${
             mode === "route" ? "border-[#39FF14] bg-[#39FF14]/20 text-[#39FF14]" : "border-gray-600 bg-neutral-950/80 text-gray-300"
@@ -373,7 +481,30 @@ export default function MapView({ categories }: { categories: Category[] }) {
         >
           {mode === "route" ? "لغو مسیر" : "پیش‌نمایش مسیر"}
         </button>
+        <button
+          onClick={() => {
+            if (roadsideStatus === "shared") handleCancelRoadsideShare();
+            else handleRequestRoadsideHelp();
+          }}
+          disabled={roadsideStatus === "sharing"}
+          className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur disabled:opacity-50 ${
+            roadsideStatus === "shared" ? "border-red-500 bg-red-500/20 text-red-300" : "border-gray-600 bg-neutral-950/80 text-gray-300"
+          }`}
+        >
+          {roadsideStatus === "sharing" ? "در حال ارسال موقعیت..." : roadsideStatus === "shared" ? "لغو اشتراک‌گذاری موقعیت" : "درخواست کمک (خرابی)"}
+        </button>
       </div>
+
+      {roadsideStatus === "shared" && (
+        <div className="absolute left-1/2 top-16 z-30 w-[min(320px,80vw)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-neutral-950/95 p-3 text-xs text-red-200 shadow-xl backdrop-blur">
+          موقعیت شما به‌صورت موقت و قابل‌لغو ثبت شد (حداکثر ۲ ساعت). این موقعیت تا زمانی که لغو نکنید یا منقضی شود، فقط برای شما و ادمین قابل مشاهده است.
+        </div>
+      )}
+      {roadsideStatus === "error" && (
+        <div className="absolute left-1/2 top-16 z-30 w-[min(320px,80vw)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-neutral-950/95 p-3 text-xs text-red-300 shadow-xl backdrop-blur">
+          ثبت موقعیت ناموفق بود (دسترسی موقعیت مکانی رد شد یا در دسترس نیست).
+        </div>
+      )}
 
       {mode === "route" && (
         <div className="absolute bottom-4 left-1/2 z-30 w-[min(360px,90vw)] -translate-x-1/2 rounded-xl border border-[#39FF14]/30 bg-neutral-950/95 p-4 text-sm text-gray-200 shadow-xl backdrop-blur">
@@ -429,9 +560,66 @@ export default function MapView({ categories }: { categories: Category[] }) {
                   ))}
                 </div>
               )}
-              <button onClick={() => setRoutePoints([])} className="mt-2 w-full rounded-lg border border-gray-600 px-3 py-2 text-gray-300">
-                انتخاب دوباره
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => { setRoutePoints([]); stopNavigation(); setRouteServices(null); }}
+                  className="flex-1 rounded-lg border border-gray-600 px-3 py-2 text-gray-300"
+                >
+                  انتخاب دوباره
+                </button>
+                {!navState ? (
+                  <button onClick={startNavigation} className="flex-1 rounded-lg bg-[#39FF14] px-3 py-2 font-bold text-neutral-950">
+                    شروع ناوبری
+                  </button>
+                ) : (
+                  <button onClick={stopNavigation} className="flex-1 rounded-lg border border-red-500 px-3 py-2 text-red-300">
+                    پایان ناوبری
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={handleFindServicesAlongRoute}
+                disabled={routeServicesLoading}
+                className="mt-2 w-full rounded-lg border border-[#39FF14]/30 px-3 py-2 text-xs text-[#39FF14] disabled:opacity-50"
+              >
+                {routeServicesLoading ? "در حال جستجوی خدمات..." : "خدمات ثبت‌شده نزدیک مسیر"}
               </button>
+              {routeServices && (
+                <div className="mt-1 max-h-32 overflow-y-auto rounded-lg border border-gray-700 bg-neutral-900/60 p-2 text-xs text-gray-300">
+                  {routeServices.length === 0 ? (
+                    <p className="text-gray-500">سرویس ثبت‌شده‌ای نزدیک این مسیر یافت نشد.</p>
+                  ) : (
+                    routeServices.map((s) => (
+                      <p key={s.id}>
+                        {s.name} <span className="text-gray-500">({s.userType === "rescuer" ? "امداد" : "سرویس"}{s.city ? ` — ${s.city}` : ""})</span>
+                      </p>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {navState && (
+                <div className="mt-2 rounded-lg border border-[#39FF14]/30 bg-neutral-900/70 p-2 text-xs">
+                  {navState.status === "error" ? (
+                    <p className="text-red-400">{navState.errorMessage}</p>
+                  ) : navState.status === "arrived" ? (
+                    <p className="font-bold text-[#39FF14]">به مقصد رسیدید.</p>
+                  ) : (
+                    <>
+                      <p className={navState.status === "off_route" ? "font-bold text-yellow-400" : "text-gray-300"}>
+                        {navState.status === "off_route" ? "⚠ خارج از مسیر — نیاز به مسیر جدید" : "در حال حرکت روی مسیر"}
+                      </p>
+                      <p className="text-gray-400">
+                        باقی‌مانده: {(navState.distanceRemainingMeters / 1000).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} کیلومتر
+                      </p>
+                      {navState.degradedGps && <p className="text-yellow-500">سیگنال GPS ضعیف است.</p>}
+                    </>
+                  )}
+                  {navState.permission === "denied" && <p className="mt-1 text-red-400">دسترسی به موقعیت مکانی رد شد.</p>}
+                  {navState.permission === "unsupported" && <p className="mt-1 text-red-400">این مرورگر از موقعیت‌یابی پشتیبانی نمی‌کند.</p>}
+                </div>
+              )}
             </>
           ) : (
             <p className="text-red-400">محاسبه مسیر با خطا مواجه شد.</p>
@@ -481,6 +669,8 @@ export default function MapView({ categories }: { categories: Category[] }) {
         <div className="mt-3 border-t border-[#39FF14]/10 pt-2 text-xs text-gray-500">
           <p>ترافیک زنده: غیرفعال (بدون سرویس‌دهنده رایگان تاییدشده)</p>
           <p>آب‌وهوای مسیر: غیرفعال (بدون سرویس‌دهنده رایگان تاییدشده)</p>
+          <p>ناوبری در پس‌زمینه/صفحه قفل: غیرفعال (نیازمند اپلیکیشن بومی)</p>
+          <p>تبلیغات: غیرفعال (بدون زیرساخت تجاری کسب‌وکارهای ثبت‌شده)</p>
         </div>
       </div>
 

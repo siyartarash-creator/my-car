@@ -52,7 +52,7 @@ ok(box.minLng < tehran.lng && tehran.lng < box.maxLng, 'bounding box contains it
 // geocoding was activated in Phase 2 item B (OSM Nominatim via a
 // rate-limited server-side proxy); everything still out of the approved
 // Phase 2 scope must stay disabled.
-for (const cap of ['traffic', 'weather', 'truck_routing', 'live_navigation']) {
+for (const cap of ['traffic', 'weather', 'truck_routing', 'live_navigation_background', 'map_advertising', 'route_history']) {
   ok(!capabilities.isCapabilityEnabled(cap), `${cap} must stay disabled`);
 }
 ok(capabilities.isCapabilityEnabled('tiles'), 'tiles capability enabled');

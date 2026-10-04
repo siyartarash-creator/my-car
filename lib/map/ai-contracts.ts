@@ -9,11 +9,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { boundingBox, haversineMeters } from "./geo";
 import { StraightLineRoutingAdapter } from "./adapters/routing-straight-line";
 import { DemoTilesAdapter } from "./adapters/tiles-demo";
-import { DisabledTrafficAdapter, DisabledWeatherAdapter } from "./adapters/disabled-ports";
+import { DisabledAdAdapter, DisabledTrafficAdapter, DisabledWeatherAdapter } from "./adapters/disabled-ports";
 import { isCapabilityEnabled } from "./capabilities";
 import { disabled } from "./types";
 import type { CapabilityResult, LatLng, MapFeature, MapServiceLocation } from "./types";
 import type {
+  AdCreative,
+  AdTargeting,
   GeocodeResult,
   RestrictionWarning,
   RoutePreview,
@@ -28,6 +30,7 @@ const routingPort = new StraightLineRoutingAdapter();
 const tilesPort = new DemoTilesAdapter();
 const trafficPort = new DisabledTrafficAdapter();
 const weatherPort = new DisabledWeatherAdapter();
+const adPort = new DisabledAdAdapter();
 
 export function getTileStyle() {
   return tilesPort.getStyle();
@@ -371,4 +374,125 @@ export async function submitCommunityReport(
   });
   if (error) throw error;
   return data as number;
+}
+
+// --- Phase 3 Part 3: MY CAR service network --------------------------
+
+// find_services_along_route (AI-owned Map tool): samples the route's
+// origin/waypoints/destination (not every coordinate -- this is "which
+// registered services are near this route," not a dense corridor scan)
+// and merges getNearbyServiceLocations results, deduped by id. Only
+// registered MY CAR service/rescuer profiles ever appear here -- this
+// reuses map_service_locations/nearby_service_locations exactly as-is,
+// never pulls in an arbitrary external business.
+export async function findServicesAlongRoute(
+  client: SupabaseClient,
+  routePoints: LatLng[],
+  radiusMeters: number,
+  userType?: MapServiceLocation["userType"],
+): Promise<CapabilityResult<MapServiceLocation[]>> {
+  if (!isCapabilityEnabled("services_along_route")) {
+    return disabled("services_along_route", "Services-along-route is not activated");
+  }
+  const results = await Promise.all(routePoints.map((p) => getNearbyServiceLocations(client, p, radiusMeters)));
+  const byId = new Map<number, MapServiceLocation>();
+  for (const r of results) {
+    if (r.status !== "ok") continue;
+    for (const loc of r.data) {
+      if (userType && loc.userType !== userType) continue;
+      if (!byId.has(loc.id)) byId.set(loc.id, loc);
+    }
+  }
+  const merged = [...byId.values()];
+  merged.sort((a, b) => haversineMeters(routePoints[0], a) - haversineMeters(routePoints[0], b));
+  return { status: "ok", data: merged };
+}
+
+// --- Phase 3 Part 3: roadside Map-side location handoff ----------------
+// This is the Map-owned primitive only -- a stranded driver's opt-in,
+// revocable, short-TTL location share. It is NOT a dispatch/matching
+// system: deciding who gets matched to a breakdown report is a separate
+// domain's business logic (see the CROSS-DOMAIN DEPENDENCY note in
+// supabase/migrations/202610060000_map_phase3_part3_location_share.sql).
+
+export type LocationShareContext = "roadside_breakdown" | "other";
+
+// create_location_share: default OFF -- nothing calls this except an
+// explicit user action (see the "درخواست کمک" button in MapView.tsx).
+export async function createLocationShare(
+  client: SupabaseClient,
+  point: LatLng,
+  context: LocationShareContext = "roadside_breakdown",
+  ttlMinutes = 120,
+): Promise<number> {
+  const { data, error } = await client.rpc("create_location_share", {
+    p_lat: point.lat,
+    p_lng: point.lng,
+    p_context: context,
+    p_ttl_minutes: ttlMinutes,
+  });
+  if (error) throw error;
+  return data as number;
+}
+
+export async function revokeLocationShare(client: SupabaseClient, shareId: number): Promise<void> {
+  const { error } = await client.rpc("revoke_location_share", { p_share_id: shareId });
+  if (error) throw error;
+}
+
+// grant_location_share_access: the owner hands a specific other profile
+// (e.g. a responder they've been connected with) read access to an
+// active share. This is the Map-side half of "temporary location
+// handoff" -- a future responder-matching feature would call this once
+// it decides who the owner is handing off to; Map itself never decides
+// that match.
+export async function grantLocationShareAccess(client: SupabaseClient, shareId: number, granteeProfileId: string): Promise<number> {
+  const { data, error } = await client.rpc("grant_location_share_access", {
+    p_share_id: shareId,
+    p_grantee_profile_id: granteeProfileId,
+  });
+  if (error) throw error;
+  return data as number;
+}
+
+export type LocationShare = {
+  id: number;
+  context: LocationShareContext;
+  lat: number;
+  lng: number;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+// My own active shares (RLS already scopes this to profile_id = me OR
+// admin OR an active grant -- but this helper is specifically "what have
+// I shared," so it's used by the share-owner's own UI, not a grantee's).
+export async function getMyActiveLocationShares(client: SupabaseClient): Promise<LocationShare[]> {
+  const { data, error } = await client
+    .from("map_location_shares")
+    .select("id, context, lat, lng, created_at, expires_at, revoked_at")
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    context: row.context,
+    lat: row.lat,
+    lng: row.lng,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+  }));
+}
+
+// --- Phase 3 Part 3: advertising (Map-side architecture only) ----------
+// get_map_ads (AI-owned Map tool): CROSS-DOMAIN DEPENDENCY -- see AdPort
+// in lib/map/ports.ts and map_advertising in capabilities.ts. Disabled
+// until a registered-business ad backend exists; never serves a
+// placeholder/fake ad.
+export async function getMapAds(targeting: AdTargeting): Promise<CapabilityResult<AdCreative[]>> {
+  if (!isCapabilityEnabled("map_advertising")) return disabled("map_advertising", "Map advertising is not activated");
+  return adPort.getAdsForTargeting(targeting);
 }

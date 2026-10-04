@@ -153,3 +153,31 @@ export interface WeatherPort {
 // data). Community submissions go through the submitCommunityReport
 // contract in ai-contracts.ts, which calls a security-definer RPC, never a
 // provider port.
+
+// Phase 3 Part 3: Map-side advertising architecture only. CROSS-DOMAIN
+// DEPENDENCY -- real ad inventory requires a registered-business
+// commercial/ad-purchase backend that doesn't exist yet (it would belong
+// to the Store/Services domain, not Map). This contract exists so Map can
+// slot a real source in later without any caller (UI or AI) changing; see
+// map_advertising in capabilities.ts (disabled).
+export type AdTargeting = {
+  center: LatLng;
+  radiusMeters?: number;
+  // A route corridor (e.g. a RoutePreview.geometry's coordinates as
+  // LatLng) -- an ad relevant along this path rather than only at a point.
+  corridor?: LatLng[];
+  categorySlug?: string;
+  vehicle?: VehicleType;
+};
+
+export type AdCreative = {
+  id: string;
+  label: string; // always rendered with an explicit "Ad"/"تبلیغ" marker by the caller -- see MapView.tsx
+  businessProfileId: string; // must be a registered MY CAR business -- never an arbitrary external advertiser
+  lat: number;
+  lng: number;
+};
+
+export interface AdPort {
+  getAdsForTargeting(targeting: AdTargeting): Promise<CapabilityResult<AdCreative[]>>;
+}
