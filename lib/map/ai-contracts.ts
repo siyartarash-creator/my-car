@@ -148,6 +148,45 @@ export async function previewRoute(
   return { ...result, data: { ...result.data, restrictionWarnings } };
 }
 
+// get_truck_restrictions (Phase 3 Part 4 AI tool): the same verified-
+// restriction data previewRoute composes for a truck route, exposed as
+// its own point+radius query -- for a caller that wants restrictions near
+// a single location rather than along a full route request.
+export async function getTruckRestrictions(
+  client: SupabaseClient,
+  center: LatLng,
+  radiusMeters: number,
+  truckProfile?: TruckProfile,
+): Promise<CapabilityResult<RestrictionWarning[]>> {
+  if (!isCapabilityEnabled("truck_restriction_advisory")) {
+    return disabled("truck_restriction_advisory", "Truck restriction advisory is not activated");
+  }
+  const box = boundingBox(center, radiusMeters);
+  const { data, error } = await client
+    .from("map_road_restrictions")
+    .select("restriction_type, max_value, unit, note, map_features!inner(lat, lng, status)")
+    .eq("map_features.status", "verified")
+    .gte("map_features.lat", box.minLat)
+    .lte("map_features.lat", box.maxLat)
+    .gte("map_features.lng", box.minLng)
+    .lte("map_features.lng", box.maxLng);
+  if (error) throw error;
+  const results: RestrictionWarning[] = (data ?? []).map((row: Record<string, unknown>) => {
+    const restrictionType = row.restriction_type as RestrictionWarning["restrictionType"];
+    const maxValue = row.max_value as number | null;
+    const unit = row.unit as string | null;
+    return {
+      restrictionType,
+      maxValue,
+      unit,
+      note: row.note as string | null,
+      verified: true,
+      severity: severityFor(restrictionType, maxValue, unit, truckProfile),
+    };
+  });
+  return { status: "ok", data: results };
+}
+
 // Postgres "undefined_function" -- raised when the DB-native proximity
 // RPCs from supabase/staging/202610040001_map_proximity_rpcs.sql aren't
 // present yet (PostGIS not activated on this environment). Falling back
@@ -374,6 +413,28 @@ export async function submitCommunityReport(
   });
   if (error) throw error;
   return data as number;
+}
+
+// report_road_condition (Phase 3 Part 4 AI tool): a thin, road_event-
+// specific wrapper over submitCommunityReport -- looks up the road_event
+// category id so a caller (AI or UI) never needs to know it. Same write
+// boundary as submitCommunityReport: lands as a 'pending' report, never a
+// verified canonical map_features row. AI cannot directly create verified
+// canonical road data -- only an admin's review_community_report can.
+export async function reportRoadCondition(
+  client: SupabaseClient,
+  point: LatLng,
+  eventType: RoadEvent["eventType"],
+  severity: RoadEvent["severity"],
+  description: string | null = null,
+): Promise<number> {
+  const { data: category, error: categoryError } = await client
+    .from("map_poi_categories")
+    .select("id")
+    .eq("slug", "road_event")
+    .single();
+  if (categoryError) throw categoryError;
+  return submitCommunityReport(client, point, description, category.id as number, { eventType, severity });
 }
 
 // --- Phase 3 Part 3: MY CAR service network --------------------------

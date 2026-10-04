@@ -4,6 +4,14 @@ import { disabled } from "../types";
 import type { CapabilityResult } from "../types";
 import type { GeocodeResult, GeocodingPort } from "../ports";
 
+// Failure isolation: a hung or dead Nominatim must not hang this app's
+// own request indefinitely. AbortSignal.timeout() both races the fetch
+// AND actually aborts the underlying connection on expiry (unlike racing
+// a bare timer promise, which would leave the fetch running in the
+// background) -- see lib/map/resilience.ts for the non-fetch equivalent
+// (withTimeout) used where there's no AbortSignal-aware call to pass it to.
+const NOMINATIM_TIMEOUT_MS = 5_000;
+
 // $0 provider: OSM Nominatim's public search API. This adapter is
 // server-only -- Nominatim's usage policy requires a descriptive
 // User-Agent identifying the application, and browsers refuse to let JS
@@ -36,7 +44,7 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
     // only restricts when the query itself doesn't strongly imply elsewhere.
     url.searchParams.set("countrycodes", "ir");
 
-    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(NOMINATIM_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`nominatim_http_${res.status}`);
     const rows = (await res.json()) as NominatimRow[];
     return {

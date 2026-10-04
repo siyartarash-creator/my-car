@@ -30,6 +30,7 @@ import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
 import type { GeocodeResult, RoutePreview, VehicleType } from "@/lib/map/ports";
 import { NavigationSession } from "@/lib/map/navigation";
 import type { NavigationState } from "@/lib/map/navigation";
+import { cacheSnapshot, getCachedSnapshot, areaCacheKey } from "@/lib/map/offline";
 
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
@@ -95,20 +96,39 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [roadsideShareId, setRoadsideShareId] = useState<number | null>(null);
   const [roadsideStatus, setRoadsideStatus] = useState<"idle" | "sharing" | "shared" | "error">("idle");
 
+  // --- Phase 3 Part 4: offline cache (clearly labeled, never silent) -----
+  const [offlineSnapshotAt, setOfflineSnapshotAt] = useState<string | null>(null);
+
   const loadNearby = useCallback(async (center: LatLng) => {
+    const cacheKey = areaCacheKey(center.lat, center.lng);
     try {
       const [svc, feat, events] = await Promise.all([
         getNearbyServiceLocations(supabase, center, SEARCH_RADIUS_METERS),
         getNearbyFeatures(supabase, center, SEARCH_RADIUS_METERS),
         findRoadEvents(supabase, center, SEARCH_RADIUS_METERS),
       ]);
-      setServices(svc.status === "ok" ? svc.data : []);
-      setFeatures(feat.status === "ok" ? feat.data : []);
-      setRoadEventSeverityById(
-        events.status === "ok" ? Object.fromEntries(events.data.map((e) => [e.id, e.severity])) : {},
-      );
+      const svcData = svc.status === "ok" ? svc.data : [];
+      const featData = feat.status === "ok" ? feat.data : [];
+      const severityById = events.status === "ok" ? Object.fromEntries(events.data.map((e) => [e.id, e.severity])) : {};
+      setServices(svcData);
+      setFeatures(featData);
+      setRoadEventSeverityById(severityById);
+      setOfflineSnapshotAt(null); // fresh data -- not offline
+      cacheSnapshot(cacheKey, { services: svcData, features: featData, severityById });
     } catch {
-      setErrorMessage("دریافت اطلاعات نقشه با خطا مواجه شد.");
+      // Honest $0 offline layer (lib/map/offline.ts): fall back to the
+      // last successful response for this area, clearly labeled as stale
+      // -- never silently presented as live data.
+      const cached = getCachedSnapshot<{ services: MapServiceLocation[]; features: MapFeature[]; severityById: Record<number, "low" | "medium" | "high" | "critical"> }>(cacheKey);
+      if (cached) {
+        setServices(cached.data.services);
+        setFeatures(cached.data.features);
+        setRoadEventSeverityById(cached.data.severityById);
+        setOfflineSnapshotAt(cached.cachedAt);
+        setErrorMessage("اتصال برقرار نشد -- نمایش داده‌های ذخیره‌شده (آفلاین).");
+      } else {
+        setErrorMessage("دریافت اطلاعات نقشه با خطا مواجه شد.");
+      }
     }
   }, []);
 
@@ -399,6 +419,12 @@ export default function MapView({ categories }: { categories: Category[] }) {
         </div>
       )}
 
+      {offlineSnapshotAt && (
+        <div className="absolute bottom-4 right-4 z-30 rounded-full border border-yellow-500/40 bg-yellow-500/10 px-3 py-1.5 text-xs text-yellow-300">
+          حالت آفلاین -- داده‌های ذخیره‌شده از {new Date(offlineSnapshotAt).toLocaleString("fa-IR")}
+        </div>
+      )}
+
       <div className="absolute left-1/2 top-4 z-30 w-[min(320px,70vw)] -translate-x-1/2">
         <form onSubmit={handleSearchSubmit} className="flex gap-2">
           <input
@@ -671,6 +697,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
           <p>آب‌وهوای مسیر: غیرفعال (بدون سرویس‌دهنده رایگان تاییدشده)</p>
           <p>ناوبری در پس‌زمینه/صفحه قفل: غیرفعال (نیازمند اپلیکیشن بومی)</p>
           <p>تبلیغات: غیرفعال (بدون زیرساخت تجاری کسب‌وکارهای ثبت‌شده)</p>
+          <p>کاشی‌های آفلاین/ناوبری بدون اینترنت: غیرفعال (نیازمند زیرساخت یا اپلیکیشن بومی)</p>
         </div>
       </div>
 

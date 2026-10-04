@@ -5,6 +5,8 @@ let searchResult = { status: "ok", data: [{ label: "Tehran", lat: 35.7, lng: 51.
 let searchError = null;
 let searchCalls = 0;
 
+const capabilities = load("lib/map/capabilities.ts");
+const resilience = load("lib/map/resilience.ts", { "./capabilities": capabilities });
 const { GET } = load("app/api/map/geocode/route.ts", {
   "@/lib/map/adapters/geocoding-nominatim": {
     NominatimGeocodingAdapter: class {
@@ -15,6 +17,7 @@ const { GET } = load("app/api/map/geocode/route.ts", {
       }
     },
   },
+  "@/lib/map/resilience": resilience,
 });
 
 function request(query) {
@@ -59,6 +62,26 @@ function request(query) {
 
   // Response is never cached (search results shouldn't be stored client-side beyond the session).
   assert.equal(third.headers.get("cache-control"), "no-store"); passed++;
+
+  // --- Phase 3 Part 4: circuit breaker failure isolation -------------------
+  // 4 more consecutive failures (5 total, including "third" above) opens
+  // the breaker (failureThreshold: 5 in the route). searchCalls so far:
+  // 1 success (first) + 1 (third) + 4 (this loop) = 6.
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setTimeout(r, 1150));
+    const r = await request("خطا" + i);
+    assert.equal(r.status, 502); passed++;
+  }
+  assert.equal(searchCalls, 6); passed++;
+
+  // While open, the adapter is never called again -- isolation, not just
+  // "still erroring every time."
+  await new Promise((r) => setTimeout(r, 1150));
+  const openCall = await request("دیگر");
+  assert.equal(openCall.status, 502); passed++;
+  const openBody = await openCall.json();
+  assert.ok(openBody.reason.includes("غیرفعال"), 'circuit-open reason text differs from a generic adapter failure'); passed++;
+  assert.equal(searchCalls, 6); passed++; // still 6 -- the breaker short-circuited before calling the adapter
 
   console.log(`${passed} map geocode route assertions passed.`);
 })().catch((e) => { console.error(e); process.exitCode = 1; });

@@ -16,7 +16,10 @@ export type MapCapability =
   | "services_along_route"
   | "roadside_location_share"
   | "map_advertising"
-  | "route_history";
+  | "route_history"
+  | "offline_cache"
+  | "offline_tiles"
+  | "offline_navigation";
 
 export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reason: string }> = {
   tiles: { enabled: true, reason: "$0 MapLibre + OSM-compatible demo tiles" },
@@ -77,6 +80,21 @@ export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reas
     enabled: false,
     reason:
       "Multi-point trip-trail logging is not implemented -- no identified consumer beyond the single-point roadside_location_share (which already covers the Part 3 'location sharing' requirement with its own retention/revocation). Building a persistent trail with no consumer would be an unjustified privacy risk; left disabled rather than built speculatively.",
+  },
+  offline_cache: {
+    enabled: true,
+    reason:
+      "Phase 3 Part 4, $0: the last successful nearby-features/services/road-events response for a given area is cached in the browser's own localStorage (lib/map/offline.ts) and served, clearly labeled stale, when a fresh fetch fails. Per-device only -- never synced, never a server-side cache.",
+  },
+  offline_tiles: {
+    enabled: false,
+    reason:
+      "Offline map tiles (e.g. a downloaded PMTiles archive) need a tile package to be generated and hosted somewhere, which costs storage/bandwidth -- not available at $0 in this repo today. The live DemoTilesAdapter has no offline fallback; an offline tile capability would be a second TilesPort implementation behind the same interface (see lib/map/ports.ts), not a rewrite, once a $0-or-approved hosting path exists.",
+  },
+  offline_navigation: {
+    enabled: false,
+    reason:
+      "Turn-by-turn navigation with no network at all needs offline tiles (see offline_tiles) AND an offline-capable routing engine bundled client-side -- neither exists at $0 today. A native app with a bundled offline router/tile set is the realistic path; this is a platform dependency, not a Map-code gap.",
   },
 };
 
