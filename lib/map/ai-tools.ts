@@ -32,7 +32,7 @@ import {
 } from "./ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "./types";
 import type { RouteRequest } from "./ports";
-import type { RoadEvent } from "./ai-contracts";
+import type { RoadEvent, RoadEventSeverity, RoadEventType } from "./ai-contracts";
 
 function filterByUserType(results: MapServiceLocation[], userType?: MapServiceLocation["userType"]) {
   return userType ? results.filter((r) => r.userType === userType) : results;
@@ -93,8 +93,8 @@ export const MAP_AI_TOOLS = {
   report_road_condition: (
     client: SupabaseClient,
     point: LatLng,
-    eventType: RoadEvent["eventType"],
-    severity: RoadEvent["severity"],
+    eventType: RoadEventType,
+    severity: RoadEventSeverity,
     description?: string | null,
   ) => reportRoadCondition(client, point, eventType, severity, description ?? null),
 } as const;

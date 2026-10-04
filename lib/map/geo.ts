@@ -83,6 +83,37 @@ export function routeProgress(point: LatLng, path: LatLng[]): RouteProgress {
   };
 }
 
+// A bounding box around an entire multi-point path (not just its two
+// endpoints), padded by paddingMeters in every direction. Two properties
+// a plain origin/destination bounding box doesn't have:
+// 1. A horizontal or vertical route (all points share a latitude or
+//    longitude) degenerates a raw min/max box to zero width/height,
+//    silently excluding anything off to the side -- the padding here
+//    guarantees a real box even then.
+// 2. This is a SQL-side pre-filter only, deliberately over-inclusive
+//    (a diagonal route's bounding box includes its empty corners) --
+//    callers MUST still apply a true point-to-route distance check
+//    (routeProgress(...).crossTrackMeters) to each candidate row before
+//    treating it as "near this route." See lib/map/ai-contracts.ts
+//    getRestrictionWarnings/getTruckRestrictions for that pairing.
+export function expandedRouteBoundingBox(path: LatLng[], paddingMeters: number) {
+  const lats = path.map((p) => p.lat);
+  const lngs = path.map((p) => p.lng);
+  const rawMinLat = Math.min(...lats);
+  const rawMaxLat = Math.max(...lats);
+  const rawMinLng = Math.min(...lngs);
+  const rawMaxLng = Math.max(...lngs);
+  const refLat = (rawMinLat + rawMaxLat) / 2;
+  const latPad = paddingMeters / 111_320;
+  const lngPad = paddingMeters / (111_320 * Math.cos((refLat * Math.PI) / 180) || 1);
+  return {
+    minLat: Math.max(-90, rawMinLat - latPad),
+    maxLat: Math.min(90, rawMaxLat + latPad),
+    minLng: Math.max(-180, rawMinLng - lngPad),
+    maxLng: Math.min(180, rawMaxLng + lngPad),
+  };
+}
+
 export function isValidLatLng(p: Partial<LatLng>): p is LatLng {
   return (
     typeof p.lat === "number" &&

@@ -73,7 +73,9 @@ const weather = await aiTools.MAP_AI_TOOLS.get_route_weather([tehran, karaj]);
 ok(weather.status === 'capability_disabled' && weather.capability === 'weather', 'get_route_weather tool reports capability_disabled');
 
 // --- get_truck_restrictions: real data, severity computed from truckProfile ---
-const restrictionRows = [{ restriction_type: 'height', max_value: 4.0, unit: 'm', note: null, map_features: { status: 'verified' } }];
+// Phase 3 audit fix: getTruckRestrictions now filters by true
+// haversine distance from center, so the fixture needs real lat/lng.
+const restrictionRows = [{ restriction_type: 'height', max_value: 4.0, unit: 'm', note: null, map_features: { lat: tehran.lat, lng: tehran.lng, status: 'verified' } }];
 const restrictions = await aiTools.MAP_AI_TOOLS.get_truck_restrictions(fakeClient(restrictionRows), tehran, 5000, { heightM: 4.5 });
 ok(restrictions.status === 'ok' && restrictions.data[0].severity === 'exceeds_profile',
   'get_truck_restrictions computes severity from the caller-supplied truckProfile, same logic as previewRoute');

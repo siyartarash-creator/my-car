@@ -7,6 +7,7 @@ let searchCalls = 0;
 
 const capabilities = load("lib/map/capabilities.ts");
 const resilience = load("lib/map/resilience.ts", { "./capabilities": capabilities });
+const geocodingProvider = load("lib/map/geocoding-provider.ts", { "./resilience": resilience });
 const { GET } = load("app/api/map/geocode/route.ts", {
   "@/lib/map/adapters/geocoding-nominatim": {
     NominatimGeocodingAdapter: class {
@@ -17,7 +18,7 @@ const { GET } = load("app/api/map/geocode/route.ts", {
       }
     },
   },
-  "@/lib/map/resilience": resilience,
+  "@/lib/map/geocoding-provider": geocodingProvider,
 });
 
 function request(query) {

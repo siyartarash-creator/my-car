@@ -39,7 +39,12 @@ async function run() {
     'map_road_restrictions_feature_id_idx')`);
   assert.equal(idx.rows.length, 5, 'all 5 Part 4 hardening indexes exist'); passed++;
 
-  // --- submit_community_report rate limit: 10 per rolling hour ----------
+  // --- submit_community_report rate limit: 10 per hour --------------------
+  // (Superseded to a fixed-hour window + atomic upsert-increment by the
+  // Phase 3 audit corrective patch -- see
+  // tests/map-phase3-audit-corrective-db.mjs for the concurrency proof.
+  // This still passes under either window scheme since it never crosses
+  // an hour boundary.)
   await as(reporter, async () => {
     for (let i = 0; i < 10; i++) {
       const r = await db.query(`select submit_community_report((select id from map_poi_categories where slug='landmark'),35.7,51.4,'r${i}')`);
@@ -50,7 +55,7 @@ async function run() {
     await deny("select submit_community_report((select id from map_poi_categories where slug='landmark'),35.7,51.4,'11th report')");
   });
 
-  // --- create_location_share rate limit: 10 per rolling hour -------------
+  // --- create_location_share rate limit: 10 per hour (see note above) -----
   // Each call revokes the prior active share in the same context, so this
   // also proves the rate limit counts *creation attempts*, not active rows.
   await as(reporter, async () => {

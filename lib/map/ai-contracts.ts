@@ -6,7 +6,7 @@
 // AI may submit a pending community report; it may never create or verify
 // canonical map_features rows itself.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { boundingBox, haversineMeters } from "./geo";
+import { boundingBox, expandedRouteBoundingBox, haversineMeters, routeProgress } from "./geo";
 import { StraightLineRoutingAdapter } from "./adapters/routing-straight-line";
 import { DemoTilesAdapter } from "./adapters/tiles-demo";
 import { DisabledAdAdapter, DisabledTrafficAdapter, DisabledWeatherAdapter } from "./adapters/disabled-ports";
@@ -96,46 +96,79 @@ function severityFor(
   return profileValue > normalizedMax ? "exceeds_profile" : "info";
 }
 
+// Advisory corridor half-width: how far off the route's own line a
+// restriction can be and still count as "near this route." A fixed $0
+// default, not derived from any provider -- see the Phase 3 audit note
+// below on why a plain origin/destination bounding box isn't enough.
+const RESTRICTION_CORRIDOR_METERS = 500;
+
+// A map_road_restrictions row's embedded map_features(lat,lng,status) --
+// PostgREST returns this as a single object for a many-to-one !inner
+// join, but defend against an array shape too rather than assume.
+function extractFeaturePoint(row: Record<string, unknown>): LatLng | null {
+  const raw = row.map_features;
+  const feature = Array.isArray(raw) ? raw[0] : raw;
+  if (!feature || typeof feature !== "object") return null;
+  const lat = (feature as Record<string, unknown>).lat;
+  const lng = (feature as Record<string, unknown>).lng;
+  return typeof lat === "number" && typeof lng === "number" ? { lat, lng } : null;
+}
+
+function toRestrictionWarning(row: Record<string, unknown>, truckProfile: TruckProfile | undefined): RestrictionWarning {
+  const restrictionType = row.restriction_type as RestrictionWarning["restrictionType"];
+  const maxValue = row.max_value as number | null;
+  const unit = row.unit as string | null;
+  return {
+    restrictionType,
+    maxValue,
+    unit,
+    note: row.note as string | null,
+    // RLS on map_road_restrictions only returns rows tied to a verified
+    // feature to a non-admin caller, so a readable row is always verified.
+    verified: true,
+    severity: severityFor(restrictionType, maxValue, unit, truckProfile),
+  };
+}
+
 // Truck restriction warnings are advisory-only (see
 // truck_restriction_advisory in lib/map/capabilities.ts): they never change
 // the route geometry/duration above, only surface known verified
 // restrictions near the requested points for the caller to display.
+//
+// Phase 3 audit fix: a plain origin/destination/waypoint bounding
+// rectangle is wrong two ways -- (1) it's over-inclusive on a diagonal
+// route (restrictions sitting in the box's empty corners, nowhere near
+// the actual line, would have been included), and (2) it's
+// under-inclusive (a false negative) on a route that's exactly
+// horizontal or vertical, where the raw box degenerates to zero width/
+// height and excludes anything off to the side. The fix is two-part:
+// expandedRouteBoundingBox pads the box so it's never zero-width (fixes
+// #2), and every candidate row is then checked against the route's real
+// geometry via routeProgress(...).crossTrackMeters (fixes #1) -- the
+// bounding box is only ever a cheap SQL-side pre-filter now, never the
+// final answer.
 async function getRestrictionWarnings(
   client: SupabaseClient,
   request: RouteRequest,
 ): Promise<RestrictionWarning[]> {
   if (!isCapabilityEnabled("truck_restriction_advisory")) return [];
-  const points = [request.origin, ...(request.waypoints ?? []), request.destination];
-  const lats = points.map((p) => p.lat);
-  const lngs = points.map((p) => p.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
+  const path = [request.origin, ...(request.waypoints ?? []), request.destination];
+  const box = expandedRouteBoundingBox(path, RESTRICTION_CORRIDOR_METERS);
   const { data, error } = await client
     .from("map_road_restrictions")
     .select("restriction_type, max_value, unit, note, map_features!inner(lat, lng, status)")
     .eq("map_features.status", "verified")
-    .gte("map_features.lat", minLat)
-    .lte("map_features.lat", maxLat)
-    .gte("map_features.lng", minLng)
-    .lte("map_features.lng", maxLng);
+    .gte("map_features.lat", box.minLat)
+    .lte("map_features.lat", box.maxLat)
+    .gte("map_features.lng", box.minLng)
+    .lte("map_features.lng", box.maxLng);
   if (error) throw error;
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const restrictionType = row.restriction_type as RestrictionWarning["restrictionType"];
-    const maxValue = row.max_value as number | null;
-    const unit = row.unit as string | null;
-    return {
-      restrictionType,
-      maxValue,
-      unit,
-      note: row.note as string | null,
-      // RLS on map_road_restrictions only returns rows tied to a verified
-      // feature to a non-admin caller, so a readable row is always verified.
-      verified: true,
-      severity: severityFor(restrictionType, maxValue, unit, request.truckProfile),
-    };
-  });
+  return (data ?? [])
+    .filter((row: Record<string, unknown>) => {
+      const point = extractFeaturePoint(row);
+      return point != null && routeProgress(point, path).crossTrackMeters <= RESTRICTION_CORRIDOR_METERS;
+    })
+    .map((row: Record<string, unknown>) => toRestrictionWarning(row, request.truckProfile));
 }
 
 export async function previewRoute(
@@ -161,6 +194,10 @@ export async function getTruckRestrictions(
   if (!isCapabilityEnabled("truck_restriction_advisory")) {
     return disabled("truck_restriction_advisory", "Truck restriction advisory is not activated");
   }
+  // Same audit fix as getRestrictionWarnings above: the bounding box is a
+  // SQL-side pre-filter only -- a candidate in the box's corner can still
+  // be farther than radiusMeters from center (a box isn't a circle), so
+  // every row is re-checked with a true haversineMeters distance.
   const box = boundingBox(center, radiusMeters);
   const { data, error } = await client
     .from("map_road_restrictions")
@@ -171,19 +208,12 @@ export async function getTruckRestrictions(
     .gte("map_features.lng", box.minLng)
     .lte("map_features.lng", box.maxLng);
   if (error) throw error;
-  const results: RestrictionWarning[] = (data ?? []).map((row: Record<string, unknown>) => {
-    const restrictionType = row.restriction_type as RestrictionWarning["restrictionType"];
-    const maxValue = row.max_value as number | null;
-    const unit = row.unit as string | null;
-    return {
-      restrictionType,
-      maxValue,
-      unit,
-      note: row.note as string | null,
-      verified: true,
-      severity: severityFor(restrictionType, maxValue, unit, truckProfile),
-    };
-  });
+  const results: RestrictionWarning[] = (data ?? [])
+    .filter((row: Record<string, unknown>) => {
+      const point = extractFeaturePoint(row);
+      return point != null && haversineMeters(center, point) <= radiusMeters;
+    })
+    .map((row: Record<string, unknown>) => toRestrictionWarning(row, truckProfile));
   return { status: "ok", data: results };
 }
 
@@ -350,9 +380,24 @@ export async function findSafeStop(
 }
 
 export type RoadEvent = MapFeature & {
-  eventType: "closure" | "accident" | "roadworks" | "hazard" | "other";
-  severity: "low" | "medium" | "high" | "critical";
+  // Phase 3 audit fix: null means exactly what it says -- no
+  // map_road_event_details row exists for this feature (e.g. a report
+  // promoted before classification was required, or imported via some
+  // other path). Previously this silently defaulted to "other"/"low",
+  // which fabricated a classification nobody ever gave it. A caller
+  // (UI or AI) must treat null as "unclassified," never as a real
+  // low-severity "other" event.
+  eventType: "closure" | "accident" | "roadworks" | "hazard" | "other" | null;
+  severity: "low" | "medium" | "high" | "critical" | null;
 };
+
+// Write-path classification is never null -- a caller submitting a
+// report must supply a concrete type/severity (or omit classification
+// entirely, via submitCommunityReport's optional roadEvent param). Only
+// the read path (RoadEvent above) can be null, for a feature nobody ever
+// classified.
+export type RoadEventType = Exclude<RoadEvent["eventType"], null>;
+export type RoadEventSeverity = Exclude<RoadEvent["severity"], null>;
 
 // Road-event queries (AI-owned Map tool, Phase 3 Part 2): reuses the
 // existing moderated map_features/road_event pipeline -- never a parallel
@@ -373,8 +418,8 @@ export async function findRoadEvents(
     const detail = detailByFeatureId.get(f.id) as Record<string, unknown> | undefined;
     return {
       ...f,
-      eventType: (detail?.event_type as RoadEvent["eventType"]) ?? "other",
-      severity: (detail?.severity as RoadEvent["severity"]) ?? "low",
+      eventType: (detail?.event_type as RoadEvent["eventType"]) ?? null,
+      severity: (detail?.severity as RoadEvent["severity"]) ?? null,
     };
   });
   return { status: "ok", data: events };
@@ -401,7 +446,7 @@ export async function submitCommunityReport(
   // Only meaningful for a road_event category report; submit_community_report
   // validates both server-side (invalid_event_type/invalid_severity) rather
   // than trusting this client-side typing alone.
-  roadEvent?: { eventType: RoadEvent["eventType"]; severity: RoadEvent["severity"] },
+  roadEvent?: { eventType: RoadEventType; severity: RoadEventSeverity },
 ): Promise<number> {
   const { data, error } = await client.rpc("submit_community_report", {
     p_category_id: categoryId,
@@ -424,8 +469,8 @@ export async function submitCommunityReport(
 export async function reportRoadCondition(
   client: SupabaseClient,
   point: LatLng,
-  eventType: RoadEvent["eventType"],
-  severity: RoadEvent["severity"],
+  eventType: RoadEventType,
+  severity: RoadEventSeverity,
   description: string | null = null,
 ): Promise<number> {
   const { data: category, error: categoryError } = await client
@@ -501,6 +546,15 @@ export async function revokeLocationShare(client: SupabaseClient, shareId: numbe
   if (error) throw error;
 }
 
+// delete_location_share (Phase 3 audit fix, item 3): hard-deletes the
+// share row, not just marks it revoked -- revoking alone (above) only
+// ever controlled read access via RLS, it never removed the coordinates
+// from the table. This is the actual deletion path.
+export async function deleteLocationShare(client: SupabaseClient, shareId: number): Promise<void> {
+  const { error } = await client.rpc("delete_location_share", { p_share_id: shareId });
+  if (error) throw error;
+}
+
 // grant_location_share_access: the owner hands a specific other profile
 // (e.g. a responder they've been connected with) read access to an
 // active share. This is the Map-side half of "temporary location
@@ -526,13 +580,21 @@ export type LocationShare = {
   revokedAt: string | null;
 };
 
-// My own active shares (RLS already scopes this to profile_id = me OR
-// admin OR an active grant -- but this helper is specifically "what have
-// I shared," so it's used by the share-owner's own UI, not a grantee's).
+// My own active shares. Phase 3 audit fix: this now explicitly filters
+// profile_id = the caller's own id, not just RLS alone -- RLS's
+// map_location_share_read policy also lets a caller see an active share
+// they've been GRANTED access to (someone else's), so relying on RLS
+// alone here would have let a grantee's row leak into "what have I
+// shared" and hydrate revoke/delete controls for a share they don't own.
 export async function getMyActiveLocationShares(client: SupabaseClient): Promise<LocationShare[]> {
+  const {
+    data: { user },
+  } = await client.auth.getUser();
+  if (!user) return [];
   const { data, error } = await client
     .from("map_location_shares")
     .select("id, context, lat, lng, created_at, expires_at, revoked_at")
+    .eq("profile_id", user.id)
     .is("revoked_at", null)
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false });

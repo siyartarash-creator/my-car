@@ -109,7 +109,13 @@ function fakeClient(rows) {
     },
   };
 }
-const tallBridge = [{ restriction_type: 'height', max_value: 4.0, unit: 'm', note: 'tall bridge' }];
+// Phase 3 audit fix: getRestrictionWarnings now filters by true
+// point-to-route distance (see routeProgress), so every fixture needs a
+// real map_features point -- the midpoint of the tehran-karaj route is
+// on the route by construction.
+const routeMidpoint = { lat: (tehran.lat + karaj.lat) / 2, lng: (tehran.lng + karaj.lng) / 2 };
+const onRouteFeature = { lat: routeMidpoint.lat, lng: routeMidpoint.lng, status: 'verified' };
+const tallBridge = [{ restriction_type: 'height', max_value: 4.0, unit: 'm', note: 'tall bridge', map_features: onRouteFeature }];
 const exceedsCase = await aiContracts.previewRoute(fakeClient(tallBridge), {
   origin: tehran, destination: karaj, vehicle: 'truck', truckProfile: { heightM: 4.2 },
 });
@@ -130,13 +136,13 @@ const noProfileCase = await aiContracts.previewRoute(fakeClient(tallBridge), {
 ok(noProfileCase.data.restrictionWarnings[0].severity === 'unspecified',
   'no truckProfile supplied -- severity is unspecified, never guessed');
 
-const unrecognizedUnitCase = await aiContracts.previewRoute(fakeClient([{ restriction_type: 'height', max_value: 13, unit: 'ft', note: null }]), {
+const unrecognizedUnitCase = await aiContracts.previewRoute(fakeClient([{ restriction_type: 'height', max_value: 13, unit: 'ft', note: null, map_features: onRouteFeature }]), {
   origin: tehran, destination: karaj, vehicle: 'truck', truckProfile: { heightM: 4.2 },
 });
 ok(unrecognizedUnitCase.data.restrictionWarnings[0].severity === 'unspecified',
   'unrecognized restriction unit never produces a fabricated exceeds/info comparison');
 
-const vehicleClassCase = await aiContracts.previewRoute(fakeClient([{ restriction_type: 'vehicle_class', max_value: null, unit: null, note: 'no trucks' }]), {
+const vehicleClassCase = await aiContracts.previewRoute(fakeClient([{ restriction_type: 'vehicle_class', max_value: null, unit: null, note: 'no trucks', map_features: onRouteFeature }]), {
   origin: tehran, destination: karaj, vehicle: 'truck', truckProfile: { heightM: 4.2 },
 });
 ok(vehicleClassCase.data.restrictionWarnings[0].severity === 'info', 'restriction types with no comparable truckProfile field report info');

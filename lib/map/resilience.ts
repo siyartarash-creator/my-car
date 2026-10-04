@@ -41,6 +41,20 @@ export type CircuitBreakerOptions = {
   openDurationMs: number; // how long to stay open before trying again (half_open)
 };
 
+// Phase 3 audit fix: this now tracks real runtime state (consecutive
+// failures, last success/failure timestamps), not just open/closed --
+// see getHealth() below. getProviderHealthSnapshot (further down) was
+// renamed to getCapabilityConfigurationSnapshot because it only ever
+// reported static config, never this kind of live state; CircuitBreaker
+// is where genuine runtime health actually lives, for the one real
+// provider (geocoding) that has a breaker wired to it.
+export type CircuitBreakerHealth = {
+  state: CircuitState;
+  consecutiveFailures: number;
+  lastSuccessAt: string | null; // ISO timestamp
+  lastFailureAt: string | null; // ISO timestamp
+};
+
 // Minimal consecutive-failure circuit breaker. Not persisted -- resets on
 // process restart, same documented tradeoff as the geocode route's
 // in-memory rate limiter (acceptable at this project's single-instance
@@ -49,6 +63,8 @@ export class CircuitBreaker {
   private state: CircuitState = "closed";
   private consecutiveFailures = 0;
   private openedAt = 0;
+  private lastSuccessAt: number | null = null;
+  private lastFailureAt: number | null = null;
 
   constructor(private readonly options: CircuitBreakerOptions) {}
 
@@ -57,6 +73,18 @@ export class CircuitBreaker {
       this.state = "half_open";
     }
     return this.state;
+  }
+
+  // Real runtime health, not configuration -- reflects what has actually
+  // happened to calls through this breaker, not what capabilities.ts says
+  // should be true.
+  getHealth(): CircuitBreakerHealth {
+    return {
+      state: this.getState(),
+      consecutiveFailures: this.consecutiveFailures,
+      lastSuccessAt: this.lastSuccessAt != null ? new Date(this.lastSuccessAt).toISOString() : null,
+      lastFailureAt: this.lastFailureAt != null ? new Date(this.lastFailureAt).toISOString() : null,
+    };
   }
 
   // Throws synchronously (before even attempting the call) when the
@@ -72,9 +100,11 @@ export class CircuitBreaker {
       const result = await fn();
       this.consecutiveFailures = 0;
       this.state = "closed";
+      this.lastSuccessAt = Date.now();
       return result;
     } catch (err) {
       this.consecutiveFailures++;
+      this.lastFailureAt = Date.now();
       if (this.consecutiveFailures >= this.options.failureThreshold) {
         this.state = "open";
         this.openedAt = Date.now();
@@ -84,19 +114,21 @@ export class CircuitBreaker {
   }
 }
 
-export type ProviderHealth = {
+export type CapabilityConfiguration = {
   capability: MapCapability;
   enabled: boolean;
   reason: string;
 };
 
-// Observability snapshot: every Map capability's current enabled/disabled
-// state and why, in one call -- the quota/budget-observability surface
-// Part 4 asks for. There is no usage metering here because there is no
-// metered provider yet (every live capability is $0, no quota to track);
-// this is the hook a real paid provider's usage/budget numbers would
-// attach to without changing this function's shape.
-export function getProviderHealthSnapshot(): ProviderHealth[] {
+// Phase 3 audit fix: renamed from getProviderHealthSnapshot /
+// ProviderHealth, which claimed to be "health" while only ever reporting
+// the static CAPABILITY_REGISTRY -- enabled/disabled config never
+// changes at runtime based on anything actually happening to a provider.
+// This is deliberately just configuration, clearly named as such now.
+// For the one provider with real runtime health (geocoding, via its
+// CircuitBreaker), see app/api/map/geocode/route.ts's exported
+// getGeocodeProviderHealth().
+export function getCapabilityConfigurationSnapshot(): CapabilityConfiguration[] {
   return (Object.keys(CAPABILITY_REGISTRY) as MapCapability[]).map((capability) => ({
     capability,
     enabled: CAPABILITY_REGISTRY[capability].enabled,

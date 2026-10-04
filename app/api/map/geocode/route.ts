@@ -1,5 +1,5 @@
 import { NominatimGeocodingAdapter } from "@/lib/map/adapters/geocoding-nominatim";
-import { CircuitBreaker } from "@/lib/map/resilience";
+import { geocodeBreaker } from "@/lib/map/geocoding-provider";
 
 const adapter = new NominatimGeocodingAdapter();
 
@@ -11,13 +11,6 @@ const adapter = new NominatimGeocodingAdapter();
 // Postgres or Redis-backed) instead of this in-memory one.
 let lastCallAt = 0;
 const MIN_INTERVAL_MS = 1100;
-
-// Failure isolation: after 5 consecutive Nominatim failures (including
-// the 5s AbortSignal timeout in the adapter), stop calling it for 30s
-// rather than letting every search request re-discover the same timeout
-// one at a time. Same in-memory, single-instance caveat as the throttle
-// above.
-const breaker = new CircuitBreaker({ failureThreshold: 5, openDurationMs: 30_000 });
 
 export async function GET(request: Request) {
   const reply = (body: unknown, status = 200) =>
@@ -37,7 +30,7 @@ export async function GET(request: Request) {
   lastCallAt = now;
 
   try {
-    const result = await breaker.execute(() => adapter.search(q));
+    const result = await geocodeBreaker.execute(() => adapter.search(q));
     return reply(result);
   } catch (err) {
     const reason =

@@ -21,7 +21,8 @@ import {
   findRoadEvents,
   findServicesAlongRoute,
   createLocationShare,
-  revokeLocationShare,
+  deleteLocationShare,
+  getMyActiveLocationShares,
   previewRoute,
   searchPlaces,
   submitCommunityReport,
@@ -35,13 +36,16 @@ import { cacheSnapshot, getCachedSnapshot, areaCacheKey } from "@/lib/map/offlin
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
 
-const SEVERITY_COLOR: Record<"low" | "medium" | "high" | "critical", string> = {
+type RoadEventSeverityValue = "low" | "medium" | "high" | "critical";
+type RoadEventSeverityMap = Record<number, RoadEventSeverityValue | null>;
+
+const SEVERITY_COLOR: Record<RoadEventSeverityValue, string> = {
   low: "#ffd23f",
   medium: "#ff8c00",
   high: "#ff3939",
   critical: "#8b0000",
 };
-const SEVERITY_FA: Record<"low" | "medium" | "high" | "critical", string> = {
+const SEVERITY_FA: Record<RoadEventSeverityValue, string> = {
   low: "کم",
   medium: "متوسط",
   high: "بالا",
@@ -68,7 +72,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [services, setServices] = useState<MapServiceLocation[]>([]);
   const [features, setFeatures] = useState<MapFeature[]>([]);
-  const [roadEventSeverityById, setRoadEventSeverityById] = useState<Record<number, "low" | "medium" | "high" | "critical">>({});
+  const [roadEventSeverityById, setRoadEventSeverityById] = useState<RoadEventSeverityMap>({});
   const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(
     () => new Set(categories.map((c) => c.id)),
   );
@@ -119,7 +123,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
       // Honest $0 offline layer (lib/map/offline.ts): fall back to the
       // last successful response for this area, clearly labeled as stale
       // -- never silently presented as live data.
-      const cached = getCachedSnapshot<{ services: MapServiceLocation[]; features: MapFeature[]; severityById: Record<number, "low" | "medium" | "high" | "critical"> }>(cacheKey);
+      const cached = getCachedSnapshot<{ services: MapServiceLocation[]; features: MapFeature[]; severityById: RoadEventSeverityMap }>(cacheKey);
       if (cached) {
         setServices(cached.data.services);
         setFeatures(cached.data.features);
@@ -247,14 +251,24 @@ export default function MapView({ categories }: { categories: Category[] }) {
       if (!activeCategoryIds.has(feature.categoryId)) continue;
       const cat = categoryById[feature.categoryId];
       const el = document.createElement("div");
-      const severity = roadEventSeverityById[feature.id];
-      if (cat?.slug === "road_event" && severity) {
+      const severity = roadEventSeverityById[feature.id] ?? null;
+      const isRoadEvent = cat?.slug === "road_event";
+      if (isRoadEvent && severity) {
         const color = SEVERITY_COLOR[severity];
         el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #0a0a0a;box-shadow:0 0 6px ${color};`;
+      } else if (isRoadEvent) {
+        // Phase 3 audit fix: a road_event feature with no
+        // map_road_event_details row is shown as explicitly unclassified
+        // (neutral gray), never defaulted to a fabricated "low" severity.
+        el.style.cssText = "width:14px;height:14px;border-radius:50%;background:#9ca3af;border:2px solid #0a0a0a;";
       } else {
         el.style.cssText = "width:12px;height:12px;border-radius:50%;background:#ffffff;border:2px solid #39FF14;";
       }
-      const severityLabel = severity ? `<br/><span style="color:${SEVERITY_COLOR[severity]}">${SEVERITY_FA[severity]}</span>` : "";
+      const severityLabel = severity
+        ? `<br/><span style="color:${SEVERITY_COLOR[severity]}">${SEVERITY_FA[severity]}</span>`
+        : isRoadEvent
+          ? `<br/><span style="color:#9ca3af">نامشخص (طبقه‌بندی‌نشده)</span>`
+          : "";
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([feature.lng, feature.lat])
         .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(
@@ -362,8 +376,27 @@ export default function MapView({ categories }: { categories: Category[] }) {
     }
   }, [routeResult]);
 
-  // --- Phase 3 Part 3: roadside location handoff (explicit opt-in only) --
-  const handleRequestRoadsideHelp = useCallback(() => {
+  // --- Phase 3: roadside location sharing (explicit opt-in only) ---------
+  // Phase 3 audit fix (item 4): hydrate the caller's own active share on
+  // mount, so a page reload doesn't orphan the row -- without this, a
+  // share created before a refresh kept existing (and kept being
+  // readable by any grantee) with no way to revoke/delete it from this
+  // UI until it expired on its own.
+  useEffect(() => {
+    let cancelled = false;
+    getMyActiveLocationShares(supabase)
+      .then((shares) => {
+        if (cancelled || shares.length === 0) return;
+        setRoadsideShareId(shares[0].id);
+        setRoadsideStatus("shared");
+      })
+      .catch(() => {
+        /* no active share, or not signed in -- stay idle, not an error */
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleStartRoadsideShare = useCallback(() => {
     if (!navigator.geolocation) {
       setErrorMessage("مرورگر شما از موقعیت‌یابی پشتیبانی نمی‌کند.");
       return;
@@ -389,10 +422,14 @@ export default function MapView({ categories }: { categories: Category[] }) {
     );
   }, []);
 
-  const handleCancelRoadsideShare = useCallback(async () => {
+  // Phase 3 audit fix (item 3): hard-deletes the share row (not just
+  // revoke, which only ever controlled read access via RLS and left the
+  // coordinates in the table) -- the UI's "stop sharing" action should
+  // actually remove the data, not just hide it.
+  const handleStopRoadsideShare = useCallback(async () => {
     if (roadsideShareId == null) return;
     try {
-      await revokeLocationShare(supabase, roadsideShareId);
+      await deleteLocationShare(supabase, roadsideShareId);
     } finally {
       setRoadsideShareId(null);
       setRoadsideStatus("idle");
@@ -509,21 +546,30 @@ export default function MapView({ categories }: { categories: Category[] }) {
         </button>
         <button
           onClick={() => {
-            if (roadsideStatus === "shared") handleCancelRoadsideShare();
-            else handleRequestRoadsideHelp();
+            if (roadsideStatus === "shared") handleStopRoadsideShare();
+            else handleStartRoadsideShare();
           }}
           disabled={roadsideStatus === "sharing"}
           className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur disabled:opacity-50 ${
             roadsideStatus === "shared" ? "border-red-500 bg-red-500/20 text-red-300" : "border-gray-600 bg-neutral-950/80 text-gray-300"
           }`}
         >
-          {roadsideStatus === "sharing" ? "در حال ارسال موقعیت..." : roadsideStatus === "shared" ? "لغو اشتراک‌گذاری موقعیت" : "درخواست کمک (خرابی)"}
+          {/* Phase 3 audit fix (item 5): this was "درخواست کمک" (request
+              help), which implied a dispatch/help request gets created --
+              nothing does. This only shares a location; see the banner
+              below for the explicit dispatch-not-available statement. */}
+          {roadsideStatus === "sharing"
+            ? "در حال ارسال موقعیت..."
+            : roadsideStatus === "shared"
+              ? "توقف اشتراک‌گذاری موقعیت"
+              : "اشتراک‌گذاری موقعیت (خرابی)"}
         </button>
       </div>
 
       {roadsideStatus === "shared" && (
         <div className="absolute left-1/2 top-16 z-30 w-[min(320px,80vw)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-neutral-950/95 p-3 text-xs text-red-200 shadow-xl backdrop-blur">
-          موقعیت شما به‌صورت موقت و قابل‌لغو ثبت شد (حداکثر ۲ ساعت). این موقعیت تا زمانی که لغو نکنید یا منقضی شود، فقط برای شما و ادمین قابل مشاهده است.
+          <p>موقعیت شما به‌صورت موقت و قابل‌حذف ثبت شد (حداکثر ۲ ساعت). این موقعیت تا زمانی که آن را متوقف نکنید یا منقضی شود، فقط برای شما و ادمین قابل مشاهده است.</p>
+          <p className="mt-1 font-bold">این یک درخواست کمک/امداد نیست -- سرویس اعزام خودکار در حال حاضر فعال نیست. برای کمک واقعی با خدمات امدادی تماس بگیرید.</p>
         </div>
       )}
       {roadsideStatus === "error" && (
