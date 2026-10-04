@@ -18,6 +18,19 @@ begin;
 -- supabase/staging/202610040001_map_proximity_rpcs.sql for the DB-native
 -- proximity RPCs this enables.
 --
+-- Known accepted side effect: CREATE EXTENSION postgis creates
+-- public.spatial_ref_sys (SRID/projection reference constants, no
+-- sensitive data) without RLS, which the security advisor flags as an
+-- ERROR. Enabling RLS on it was attempted and failed: "must be owner of
+-- table spatial_ref_sys" -- that table is owned by the platform's
+-- extension-install role, not the role this environment's migrations run
+-- as, so this is a Supabase platform constraint, not something fixable
+-- from here. The advisor also flags postgis being installed in the public
+-- schema (Supabase recommends a dedicated schema) -- not changed in this
+-- pass, since moving an already-installed extension's schema is a
+-- project-wide concern beyond Map's bounded scope, not something only Map
+-- depends on.
+--
 -- Purely additive: adds a generated geography column + GiST index derived
 -- from the existing lat/lng columns on map_features and
 -- map_service_locations. Nothing here changes those columns, their check
