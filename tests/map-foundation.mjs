@@ -39,7 +39,7 @@ async function run() {
 
   // Anonymous and plain-owner visibility: only active categories, no sources.
   await as(null, async () => {
-    await check('select count(*)::int from map_poi_categories where is_active', 5);
+    await check('select count(*)::int from map_poi_categories where is_active', 6);
     await deny('select * from map_sources');
     await deny("select publish_service_location(35.7,51.4)");
   });

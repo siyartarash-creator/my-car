@@ -22,11 +22,38 @@ export async function previewRoute(origin: LatLng, destination: LatLng) {
   return routingPort.previewRoute(origin, destination);
 }
 
+// Postgres "undefined_function" -- raised when the DB-native proximity
+// RPCs from supabase/staging/202610040001_map_proximity_rpcs.sql aren't
+// present yet (PostGIS not activated on this environment). Falling back
+// keeps this contract working everywhere Phase 1 already worked; it is not
+// how a real data error looks (those come back as other codes/messages).
+const UNDEFINED_FUNCTION = "42883";
+
 export async function getNearbyServiceLocations(
   client: SupabaseClient,
   center: LatLng,
   radiusMeters: number,
 ): Promise<CapabilityResult<MapServiceLocation[]>> {
+  const rpc = await client.rpc("nearby_service_locations", {
+    p_lat: center.lat,
+    p_lng: center.lng,
+    p_radius_m: Math.round(radiusMeters),
+  });
+  if (!rpc.error) {
+    const results: MapServiceLocation[] = (rpc.data ?? []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      profileId: row.profile_id,
+      userType: row.user_type_snapshot,
+      name: row.name_snapshot,
+      city: row.city_snapshot,
+      region: row.region_snapshot,
+      lat: row.lat,
+      lng: row.lng,
+    })) as MapServiceLocation[];
+    return { status: "ok", data: results };
+  }
+  if (rpc.error.code !== UNDEFINED_FUNCTION) throw rpc.error;
+
   const box = boundingBox(center, radiusMeters);
   const { data, error } = await client
     .from("map_service_locations")
@@ -58,6 +85,27 @@ export async function getNearbyFeatures(
   radiusMeters: number,
   categorySlug?: string,
 ): Promise<CapabilityResult<MapFeature[]>> {
+  const rpc = await client.rpc("nearby_features", {
+    p_lat: center.lat,
+    p_lng: center.lng,
+    p_radius_m: Math.round(radiusMeters),
+    p_category_slug: categorySlug ?? null,
+  });
+  if (!rpc.error) {
+    const results: MapFeature[] = (rpc.data ?? []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      categoryId: row.category_id,
+      nameFa: row.name_fa,
+      nameEn: row.name_en,
+      lat: row.lat,
+      lng: row.lng,
+      status: row.status,
+      confidence: row.confidence,
+    })) as MapFeature[];
+    return { status: "ok", data: results };
+  }
+  if (rpc.error.code !== UNDEFINED_FUNCTION) throw rpc.error;
+
   const box = boundingBox(center, radiusMeters);
   let query = client
     .from("map_features")

@@ -12,15 +12,11 @@ begin;
 -- 202610030000_map_foundation.sql and 202610030001_map_ingestion.sql have
 -- already been applied there.
 --
--- Verified against STAGING on 2026-10-04: the postgis extension (3.3.7) is
--- listed as available (not yet installed) on the project reachable through
--- this environment's Supabase MCP connection. This migration has NOT been
--- applied -- applying it, and applying the two map_* migrations above, to
--- that live project requires the Owner's explicit go-ahead (see Phase 1
--- closure report), both because this environment cannot independently
--- confirm that project is the intended non-production Map STAGING target,
--- and because its migration history has already diverged with several
--- other in-flight tracks' migrations not present in this branch.
+-- APPLIED to STAGING on 2026-10-04 (Phase 2, item A), authorized by Mehdi.
+-- Verified post-apply: pg_extension shows postgis 3.3.7 installed; the
+-- geog columns and both GiST indexes exist on the hosted project. See
+-- supabase/staging/202610040001_map_proximity_rpcs.sql for the DB-native
+-- proximity RPCs this enables.
 --
 -- Purely additive: adds a generated geography column + GiST index derived
 -- from the existing lat/lng columns on map_features and
