@@ -23,8 +23,14 @@ export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reas
     enabled: true,
     reason: "Phase 2: $0 OSM Nominatim via a rate-limited server-side proxy (app/api/map/geocode)",
   },
-  traffic: { enabled: false, reason: "Live traffic is out of Phase 3 scope" },
-  weather: { enabled: false, reason: "Route/destination weather is out of Phase 3 scope" },
+  traffic: {
+    enabled: false,
+    reason: "Phase 3 Part 2: TrafficPort/TrafficSnapshot contract and AI tool (get_traffic_conditions) are complete; disabled because no legal, approved $0 live traffic provider has been identified",
+  },
+  weather: {
+    enabled: false,
+    reason: "Phase 3 Part 2: WeatherPort/WeatherSnapshot contract and AI tool (get_route_weather) are complete; disabled because no legal, commercially-usable $0 weather provider has been confirmed (Open-Meteo is a candidate but its license terms for commercial use need Owner/legal confirmation before activation)",
+  },
   truck_routing: {
     enabled: false,
     reason:

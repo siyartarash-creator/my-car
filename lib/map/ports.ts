@@ -107,13 +107,45 @@ export interface GeocodingPort {
 }
 
 export type TrafficSegment = { lat: number; lng: number; level: "free" | "moderate" | "heavy" };
+
+// Phase 3 Part 2: every TrafficPort result carries its own provenance
+// instead of a bare segment list, so a caller can render "live as of
+// 2 minutes ago, provider X, 80% confidence" or an honest degraded state
+// -- never silently treat a stale/low-confidence snapshot as current.
+export type TrafficSnapshot = {
+  segments: TrafficSegment[];
+  source: string; // provider/adapter identifier, e.g. "none" while disabled
+  observedAt: string; // ISO timestamp the snapshot reflects, not "now"
+  confidence: number; // 0-1
+};
 export interface TrafficPort {
-  getSegments(bbox: [LatLng, LatLng]): Promise<CapabilityResult<TrafficSegment[]>>;
+  getSegments(bbox: [LatLng, LatLng]): Promise<CapabilityResult<TrafficSnapshot>>;
 }
 
-export type WeatherSnapshot = { tempC: number; condition: string };
+export type WeatherHazards = {
+  snowRisk: boolean | null;
+  iceRisk: boolean | null;
+  fog: boolean | null;
+  heavyRain: boolean | null;
+  floodRisk: boolean | null;
+  severeWind: boolean | null;
+};
+
+export type WeatherSnapshot = {
+  point: LatLng;
+  tempC: number;
+  condition: string;
+  hazards: WeatherHazards;
+  source: string;
+  observedAt: string;
+  confidence: number;
+};
 export interface WeatherPort {
   getCurrent(point: LatLng): Promise<CapabilityResult<WeatherSnapshot>>;
+  // Sampled points along a route (e.g. origin, waypoints, destination, or
+  // evenly-spaced samples) -- a provider-neutral shape for "route weather",
+  // not tied to how any one provider samples a polyline.
+  getAlongRoute(points: LatLng[]): Promise<CapabilityResult<WeatherSnapshot[]>>;
 }
 
 // Read vs. write tools stay separated at the port level too: every port

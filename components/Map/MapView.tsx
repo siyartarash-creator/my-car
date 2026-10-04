@@ -14,12 +14,25 @@ if (typeof window !== "undefined") {
   maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
 }
 import { supabase } from "@/lib/supabase";
-import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, previewRoute, searchPlaces, submitCommunityReport } from "@/lib/map/ai-contracts";
+import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, findRoadEvents, previewRoute, searchPlaces, submitCommunityReport } from "@/lib/map/ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
 import type { GeocodeResult, RoutePreview, VehicleType } from "@/lib/map/ports";
 
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
+
+const SEVERITY_COLOR: Record<"low" | "medium" | "high" | "critical", string> = {
+  low: "#ffd23f",
+  medium: "#ff8c00",
+  high: "#ff3939",
+  critical: "#8b0000",
+};
+const SEVERITY_FA: Record<"low" | "medium" | "high" | "critical", string> = {
+  low: "کم",
+  medium: "متوسط",
+  high: "بالا",
+  critical: "بحرانی",
+};
 
 type Category = { id: number; slug: string; name_fa: string; icon: string | null };
 
@@ -38,6 +51,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [services, setServices] = useState<MapServiceLocation[]>([]);
   const [features, setFeatures] = useState<MapFeature[]>([]);
+  const [roadEventSeverityById, setRoadEventSeverityById] = useState<Record<number, "low" | "medium" | "high" | "critical">>({});
   const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(
     () => new Set(categories.map((c) => c.id)),
   );
@@ -55,12 +69,16 @@ export default function MapView({ categories }: { categories: Category[] }) {
 
   const loadNearby = useCallback(async (center: LatLng) => {
     try {
-      const [svc, feat] = await Promise.all([
+      const [svc, feat, events] = await Promise.all([
         getNearbyServiceLocations(supabase, center, SEARCH_RADIUS_METERS),
         getNearbyFeatures(supabase, center, SEARCH_RADIUS_METERS),
+        findRoadEvents(supabase, center, SEARCH_RADIUS_METERS),
       ]);
       setServices(svc.status === "ok" ? svc.data : []);
       setFeatures(feat.status === "ok" ? feat.data : []);
+      setRoadEventSeverityById(
+        events.status === "ok" ? Object.fromEntries(events.data.map((e) => [e.id, e.severity])) : {},
+      );
     } catch {
       setErrorMessage("دریافت اطلاعات نقشه با خطا مواجه شد.");
     }
@@ -173,16 +191,23 @@ export default function MapView({ categories }: { categories: Category[] }) {
       if (!activeCategoryIds.has(feature.categoryId)) continue;
       const cat = categoryById[feature.categoryId];
       const el = document.createElement("div");
-      el.style.cssText = "width:12px;height:12px;border-radius:50%;background:#ffffff;border:2px solid #39FF14;";
+      const severity = roadEventSeverityById[feature.id];
+      if (cat?.slug === "road_event" && severity) {
+        const color = SEVERITY_COLOR[severity];
+        el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #0a0a0a;box-shadow:0 0 6px ${color};`;
+      } else {
+        el.style.cssText = "width:12px;height:12px;border-radius:50%;background:#ffffff;border:2px solid #39FF14;";
+      }
+      const severityLabel = severity ? `<br/><span style="color:${SEVERITY_COLOR[severity]}">${SEVERITY_FA[severity]}</span>` : "";
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([feature.lng, feature.lat])
         .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(
-          `<div style="direction:rtl;font-family:sans-serif"><strong>${escapeHtml(feature.nameFa)}</strong><br/>${escapeHtml(cat?.name_fa ?? "")}</div>`,
+          `<div style="direction:rtl;font-family:sans-serif"><strong>${escapeHtml(feature.nameFa)}</strong><br/>${escapeHtml(cat?.name_fa ?? "")}${severityLabel}</div>`,
         ))
         .addTo(map);
       markersRef.current.push(marker);
     }
-  }, [services, features, activeCategoryIds, categoryById, routePoints]);
+  }, [services, features, activeCategoryIds, categoryById, routePoints, roadEventSeverityById]);
 
   const handleLocateMe = useCallback(() => {
     if (!navigator.geolocation) {
@@ -428,6 +453,34 @@ export default function MapView({ categories }: { categories: Category[] }) {
               {c.name_fa}
             </label>
           ))}
+        </div>
+
+        {/* Road-event severity legend: markers are only ever colored from
+            real map_road_event_details rows (see findRoadEvents), never a
+            hard-coded default -- a category with no road_event features
+            nearby simply shows no colored markers. */}
+        {categories.some((c) => c.slug === "road_event") && (
+          <div className="mt-3 border-t border-[#39FF14]/10 pt-2">
+            <p className="mb-1 text-xs font-bold text-gray-400">شدت رویداد جاده‌ای</p>
+            <div className="flex flex-col gap-1 text-xs text-gray-300">
+              {(["low", "medium", "high", "critical"] as const).map((s) => (
+                <div key={s} className="flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: SEVERITY_COLOR[s] }} />
+                  {SEVERITY_FA[s]}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Honest capability state: traffic/weather have a complete
+            provider-neutral contract (TrafficPort/WeatherPort,
+            get_traffic_conditions/get_route_weather) but no $0 provider is
+            activated -- shown here instead of silently omitted, so the UI
+            never implies they work. */}
+        <div className="mt-3 border-t border-[#39FF14]/10 pt-2 text-xs text-gray-500">
+          <p>ترافیک زنده: غیرفعال (بدون سرویس‌دهنده رایگان تاییدشده)</p>
+          <p>آب‌وهوای مسیر: غیرفعال (بدون سرویس‌دهنده رایگان تاییدشده)</p>
         </div>
       </div>
 

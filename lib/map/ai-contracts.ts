@@ -9,15 +9,46 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { boundingBox, haversineMeters } from "./geo";
 import { StraightLineRoutingAdapter } from "./adapters/routing-straight-line";
 import { DemoTilesAdapter } from "./adapters/tiles-demo";
+import { DisabledTrafficAdapter, DisabledWeatherAdapter } from "./adapters/disabled-ports";
 import { isCapabilityEnabled } from "./capabilities";
+import { disabled } from "./types";
 import type { CapabilityResult, LatLng, MapFeature, MapServiceLocation } from "./types";
-import type { GeocodeResult, RestrictionWarning, RoutePreview, RouteRequest, TruckProfile } from "./ports";
+import type {
+  GeocodeResult,
+  RestrictionWarning,
+  RoutePreview,
+  RouteRequest,
+  TrafficSnapshot,
+  TruckProfile,
+  VehicleType,
+  WeatherSnapshot,
+} from "./ports";
 
 const routingPort = new StraightLineRoutingAdapter();
 const tilesPort = new DemoTilesAdapter();
+const trafficPort = new DisabledTrafficAdapter();
+const weatherPort = new DisabledWeatherAdapter();
 
 export function getTileStyle() {
   return tilesPort.getStyle();
+}
+
+// get_traffic_conditions (AI-owned Map tool, Phase 3 Part 2): provider-
+// independent -- callers never see a provider payload, only this
+// CapabilityResult<TrafficSnapshot>. Disabled until a legal, approved $0
+// live traffic provider is activated; never fabricates segments.
+export async function getTrafficConditions(bbox: [LatLng, LatLng]): Promise<CapabilityResult<TrafficSnapshot>> {
+  if (!isCapabilityEnabled("traffic")) return disabled("traffic", "Live traffic is not activated");
+  return trafficPort.getSegments(bbox);
+}
+
+// get_route_weather (AI-owned Map tool, Phase 3 Part 2): sampled points
+// along a route (origin/waypoints/destination, or a caller-chosen sample).
+// Disabled until a legal, commercially-usable $0 weather provider is
+// activated; never fabricates a snapshot.
+export async function getRouteWeather(points: LatLng[]): Promise<CapabilityResult<WeatherSnapshot[]>> {
+  if (!isCapabilityEnabled("weather")) return disabled("weather", "Route/destination weather is not activated");
+  return weatherPort.getAlongRoute(points);
 }
 
 // Normalizes a restriction's free-text unit to the SI unit truckProfile
@@ -225,6 +256,88 @@ export async function getNearbyFeatures(
   return { status: "ok", data: results };
 }
 
+const FUEL_CATEGORY_SLUGS = ["petrol", "diesel", "cng", "ev_charging", "fuel_station"] as const;
+export type FuelType = (typeof FUEL_CATEGORY_SLUGS)[number];
+
+// find_fuel_stations (AI-owned Map tool, Phase 3 Part 2). Real data only --
+// returns whatever map_features currently holds for these categories
+// (honestly empty until a real import/community pipeline populates them;
+// see map_phase3_part2_infrastructure.sql for the category rows
+// themselves). Queries per-category through the existing
+// getNearbyFeatures/nearby_features path rather than a new RPC, since that
+// RPC takes one category_slug and a second ambiguous overload is exactly
+// the bug class this codebase has already hit once (see
+// review_community_report's migration history).
+export async function findFuelStations(
+  client: SupabaseClient,
+  center: LatLng,
+  radiusMeters: number,
+  fuelTypes?: FuelType[],
+): Promise<CapabilityResult<MapFeature[]>> {
+  const slugs = fuelTypes && fuelTypes.length > 0 ? fuelTypes : FUEL_CATEGORY_SLUGS;
+  const results = await Promise.all(slugs.map((slug) => getNearbyFeatures(client, center, radiusMeters, slug)));
+  const merged: MapFeature[] = [];
+  for (const r of results) if (r.status === "ok") merged.push(...r.data);
+  merged.sort((a, b) => haversineMeters(center, a) - haversineMeters(center, b));
+  return { status: "ok", data: merged };
+}
+
+const SAFE_STOP_CATEGORY_SLUGS_BY_VEHICLE: Record<VehicleType, string[]> = {
+  car: ["parking"],
+  motorcycle: ["parking"],
+  truck: ["truck_stop", "weigh_station", "parking"],
+};
+
+// find_safe_stop (AI-owned Map tool, Phase 3 Part 2): nearby places to
+// stop, scoped by vehicle -- a truck additionally sees truck_stop/
+// weigh_station categories. This is "what's nearby," not a route-corridor
+// search; corridor sampling needs real route geometry from a road-aware
+// RoutingPort, which is not activated (see lib/map/capabilities.ts).
+export async function findSafeStop(
+  client: SupabaseClient,
+  center: LatLng,
+  radiusMeters: number,
+  vehicle: VehicleType = "car",
+): Promise<CapabilityResult<MapFeature[]>> {
+  const slugs = SAFE_STOP_CATEGORY_SLUGS_BY_VEHICLE[vehicle];
+  const results = await Promise.all(slugs.map((slug) => getNearbyFeatures(client, center, radiusMeters, slug)));
+  const merged: MapFeature[] = [];
+  for (const r of results) if (r.status === "ok") merged.push(...r.data);
+  merged.sort((a, b) => haversineMeters(center, a) - haversineMeters(center, b));
+  return { status: "ok", data: merged };
+}
+
+export type RoadEvent = MapFeature & {
+  eventType: "closure" | "accident" | "roadworks" | "hazard" | "other";
+  severity: "low" | "medium" | "high" | "critical";
+};
+
+// Road-event queries (AI-owned Map tool, Phase 3 Part 2): reuses the
+// existing moderated map_features/road_event pipeline -- never a parallel
+// system. Enriches each verified road_event feature with its
+// map_road_event_details row (RLS-gated the same as the feature itself).
+export async function findRoadEvents(
+  client: SupabaseClient,
+  center: LatLng,
+  radiusMeters: number,
+): Promise<CapabilityResult<RoadEvent[]>> {
+  const nearby = await getNearbyFeatures(client, center, radiusMeters, "road_event");
+  if (nearby.status !== "ok" || nearby.data.length === 0) return nearby as CapabilityResult<RoadEvent[]>;
+  const ids = nearby.data.map((f) => f.id);
+  const { data, error } = await client.from("map_road_event_details").select("feature_id, event_type, severity").in("feature_id", ids);
+  if (error) throw error;
+  const detailByFeatureId = new Map((data ?? []).map((row: Record<string, unknown>) => [row.feature_id as number, row]));
+  const events: RoadEvent[] = nearby.data.map((f) => {
+    const detail = detailByFeatureId.get(f.id) as Record<string, unknown> | undefined;
+    return {
+      ...f,
+      eventType: (detail?.event_type as RoadEvent["eventType"]) ?? "other",
+      severity: (detail?.severity as RoadEvent["severity"]) ?? "low",
+    };
+  });
+  return { status: "ok", data: events };
+}
+
 // Calls this app's own /api/map/geocode proxy, never Nominatim directly --
 // the browser can't set the User-Agent header Nominatim's usage policy
 // requires, and routing every caller (Map UI, AI tools) through one
@@ -243,12 +356,18 @@ export async function submitCommunityReport(
   point: LatLng,
   description: string | null,
   categoryId: number | null,
+  // Only meaningful for a road_event category report; submit_community_report
+  // validates both server-side (invalid_event_type/invalid_severity) rather
+  // than trusting this client-side typing alone.
+  roadEvent?: { eventType: RoadEvent["eventType"]; severity: RoadEvent["severity"] },
 ): Promise<number> {
   const { data, error } = await client.rpc("submit_community_report", {
     p_category_id: categoryId,
     p_lat: point.lat,
     p_lng: point.lng,
     p_description: description,
+    p_event_type: roadEvent?.eventType ?? null,
+    p_severity: roadEvent?.severity ?? null,
   });
   if (error) throw error;
   return data as number;

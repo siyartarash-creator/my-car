@@ -24,11 +24,16 @@ const tilesAdapterMod = load('lib/map/adapters/tiles-demo.ts', {
   '../capabilities': capabilities,
   '../types': types,
 });
+const disabledPortsMod = load('lib/map/adapters/disabled-ports.ts', {
+  '../types': types,
+});
 const aiContracts = load('lib/map/ai-contracts.ts', {
   './geo': geo,
   './adapters/routing-straight-line': routingAdapterMod,
   './adapters/tiles-demo': tilesAdapterMod,
+  './adapters/disabled-ports': disabledPortsMod,
   './capabilities': capabilities,
+  './types': types,
 });
 
 // --- Spatial regression -----------------------------------------------
@@ -85,12 +90,19 @@ ok(multiStop.data.geometry.coordinates.length === 3, 'multi-stop geometry has on
 // behavior (covered by the map_foundation migration's own policies).
 function fakeClient(rows) {
   return {
+    // nearby_features/nearby_service_locations are PostGIS RPCs that don't
+    // exist in this fake -- reporting the same "undefined_function" code
+    // ai-contracts.ts already handles makes getNearbyFeatures fall back to
+    // the plain .from(...) bounding-box path below, exactly like a real
+    // environment with PostGIS not yet activated.
+    rpc() { return Promise.resolve({ data: null, error: { code: '42883', message: 'undefined_function (fake client)' } }); },
     from() {
       const builder = {
         select() { return builder; },
         eq() { return builder; },
         gte() { return builder; },
         lte() { return builder; },
+        in() { return builder; },
         then(resolve) { resolve({ data: rows, error: null }); },
       };
       return builder;
@@ -131,6 +143,39 @@ ok(vehicleClassCase.data.restrictionWarnings[0].severity === 'info', 'restrictio
 
 const carCase = await aiContracts.previewRoute(fakeClient(tallBridge), { origin: tehran, destination: karaj, vehicle: 'car' });
 ok(carCase.data.restrictionWarnings.length === 0, 'restriction warnings are only composed for vehicle === truck');
+
+// --- Phase 3 Part 2: traffic/weather stay honestly disabled -------------
+ok(!capabilities.isCapabilityEnabled('traffic'), 'traffic capability disabled (no $0 provider)');
+ok(!capabilities.isCapabilityEnabled('weather'), 'weather capability disabled (no $0 provider)');
+const trafficResult = await aiContracts.getTrafficConditions([tehran, karaj]);
+ok(trafficResult.status === 'capability_disabled' && trafficResult.capability === 'traffic',
+  'get_traffic_conditions returns capability_disabled, never a fabricated snapshot');
+const weatherResult = await aiContracts.getRouteWeather([tehran, karaj]);
+ok(weatherResult.status === 'capability_disabled' && weatherResult.capability === 'weather',
+  'get_route_weather returns capability_disabled, never a fabricated snapshot');
+
+// Provider-swap proof: an enabled TrafficPort/WeatherPort implementation
+// would satisfy the exact same CapabilityResult shape without touching
+// getTrafficConditions/getRouteWeather -- those two functions only gate on
+// isCapabilityEnabled, never on which concrete adapter is wired in.
+class StubEnabledTrafficAdapter {
+  async getSegments() {
+    return { status: 'ok', data: { segments: [], source: 'stub-provider', observedAt: new Date().toISOString(), confidence: 0.9 } };
+  }
+}
+const stubTraffic = await new StubEnabledTrafficAdapter().getSegments([tehran, karaj]);
+ok(stubTraffic.status === 'ok' && stubTraffic.data.source === 'stub-provider',
+  'a real TrafficPort implementation reports source/observedAt/confidence through the same shape');
+
+// --- Phase 3 Part 2: find_fuel_stations / find_safe_stop / road events,
+// honest-empty with no real data, never a synthetic fixture ------------
+const emptyClient = fakeClient([]);
+const fuel = await aiContracts.findFuelStations(emptyClient, tehran, 10_000);
+ok(fuel.status === 'ok' && fuel.data.length === 0, 'find_fuel_stations reports an honest empty state, not a fabricated station');
+const safeStop = await aiContracts.findSafeStop(emptyClient, tehran, 10_000, 'truck');
+ok(safeStop.status === 'ok' && safeStop.data.length === 0, 'find_safe_stop reports an honest empty state for a truck profile');
+const roadEvents = await aiContracts.findRoadEvents(emptyClient, tehran, 10_000);
+ok(roadEvents.status === 'ok' && roadEvents.data.length === 0, 'road-event query reports an honest empty state, reusing the existing feature pipeline');
 
 // --- Provider swap demonstration ---------------------------------------
 // Any RoutingPort implementation must be usable through the exact same

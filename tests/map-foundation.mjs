@@ -39,7 +39,10 @@ async function run() {
 
   // Anonymous and plain-owner visibility: only active categories, no sources.
   await as(null, async () => {
-    await check('select count(*)::int from map_poi_categories where is_active', 6);
+    // 5 Phase 1 base + road_event (Phase 2) + fuel_station/ev_charging/
+    // truck_stop reactivated + petrol/diesel/cng/parking/weigh_station/
+    // terminal/road_infrastructure (Phase 3 Part 2) = 16.
+    await check('select count(*)::int from map_poi_categories where is_active', 16);
     await deny('select * from map_sources');
     await deny("select publish_service_location(35.7,51.4)");
   });
