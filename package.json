@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs && node tests/map-foundation.mjs && node tests/map-ingestion.mjs"
+    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs && node tests/map-foundation.mjs && node tests/map-ingestion.mjs && node tests/map-routing.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

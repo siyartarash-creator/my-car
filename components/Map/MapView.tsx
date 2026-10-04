@@ -13,8 +13,12 @@ if (typeof window !== "undefined") {
   maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
 }
 import { supabase } from "@/lib/supabase";
-import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, submitCommunityReport } from "@/lib/map/ai-contracts";
+import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, previewRoute, submitCommunityReport } from "@/lib/map/ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
+import type { RoutePreview } from "@/lib/map/ports";
+
+const ROUTE_SOURCE_ID = "map-route-preview";
+const ROUTE_LAYER_ID = "map-route-preview-line";
 
 type Category = { id: number; slug: string; name_fa: string; icon: string | null };
 
@@ -36,9 +40,12 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(
     () => new Set(categories.map((c) => c.id)),
   );
-  const [reportMode, setReportMode] = useState(false);
+  const [mode, setMode] = useState<"none" | "report" | "route">("none");
   const [reportDraft, setReportDraft] = useState<{ point: LatLng; description: string } | null>(null);
   const [reportStatus, setReportStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [routePoints, setRoutePoints] = useState<LatLng[]>([]);
+  const [routeResult, setRouteResult] = useState<RoutePreview | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
   const categoryById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
   const loadNearby = useCallback(async (center: LatLng) => {
@@ -73,18 +80,64 @@ export default function MapView({ categories }: { categories: Category[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Click-to-report: re-bound whenever reportMode changes, so the handler
-  // always closes over the current value instead of a stale one.
+  // Click-to-report / click-to-route: re-bound whenever mode or the
+  // in-progress route selection changes, so the handler always closes over
+  // current values instead of stale ones.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const handleClick = (e: MapMouseEvent) => {
-      if (!reportMode) return;
-      setReportDraft({ point: { lat: e.lngLat.lat, lng: e.lngLat.lng }, description: "" });
+      const point: LatLng = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      if (mode === "report") {
+        setReportDraft({ point, description: "" });
+      } else if (mode === "route") {
+        setRoutePoints((prev) => {
+          const next = prev.length >= 2 ? [point] : [...prev, point];
+          if (next.length === 2) { setRouteResult(null); setRouteLoading(true); }
+          return next;
+        });
+      }
     };
     map.on("click", handleClick);
     return () => { map.off("click", handleClick); };
-  }, [reportMode]);
+  }, [mode, routePoints.length]);
+
+  // Fetch the route preview once both origin and destination are picked.
+  // routeResult is only ever read while routePoints.length === 2 (see the
+  // render below), so it's left stale rather than reset here -- resetting
+  // it is handled at the selection sites (mode toggle, re-pick) instead.
+  useEffect(() => {
+    if (routePoints.length !== 2) return;
+    let cancelled = false;
+    previewRoute(routePoints[0], routePoints[1])
+      .then((res) => { if (!cancelled) setRouteResult(res.status === "ok" ? res.data : null); })
+      .catch(() => { if (!cancelled) setErrorMessage("محاسبه مسیر با خطا مواجه شد."); })
+      .finally(() => { if (!cancelled) setRouteLoading(false); });
+    return () => { cancelled = true; };
+  }, [routePoints]);
+
+  // Draw/update the route line as a GeoJSON source+layer once the map is ready.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== "ready") return;
+    const data: GeoJSON.Feature = {
+      type: "Feature",
+      properties: {},
+      geometry: routeResult?.geometry ?? { type: "LineString", coordinates: [] },
+    };
+    const source = map.getSource(ROUTE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(data);
+    } else {
+      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data });
+      map.addLayer({
+        id: ROUTE_LAYER_ID,
+        type: "line",
+        source: ROUTE_SOURCE_ID,
+        paint: { "line-color": "#39FF14", "line-width": 4, "line-dasharray": [2, 1] },
+      });
+    }
+  }, [routeResult, status]);
 
   // Re-render markers whenever the visible data or category filter changes.
   useEffect(() => {
@@ -105,6 +158,12 @@ export default function MapView({ categories }: { categories: Category[] }) {
       markersRef.current.push(marker);
     }
 
+    routePoints.forEach((p, i) => {
+      const el = document.createElement("div");
+      el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${i === 0 ? "#39FF14" : "#ff3939"};border:2px solid #0a0a0a;`;
+      markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map));
+    });
+
     for (const feature of features) {
       if (!activeCategoryIds.has(feature.categoryId)) continue;
       const cat = categoryById[feature.categoryId];
@@ -118,7 +177,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
         .addTo(map);
       markersRef.current.push(marker);
     }
-  }, [services, features, activeCategoryIds, categoryById]);
+  }, [services, features, activeCategoryIds, categoryById, routePoints]);
 
   const handleLocateMe = useCallback(() => {
     if (!navigator.geolocation) {
@@ -150,7 +209,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
     try {
       await submitCommunityReport(supabase, reportDraft.point, reportDraft.description || null, null);
       setReportStatus("sent");
-      setTimeout(() => { setReportDraft(null); setReportMode(false); setReportStatus("idle"); }, 1500);
+      setTimeout(() => { setReportDraft(null); setMode("none"); setReportStatus("idle"); }, 1500);
     } catch {
       setReportStatus("error");
     }
@@ -184,14 +243,58 @@ export default function MapView({ categories }: { categories: Category[] }) {
           موقعیت من
         </button>
         <button
-          onClick={() => { setReportMode((v) => !v); setReportDraft(null); }}
+          onClick={() => {
+            setMode((m) => (m === "report" ? "none" : "report"));
+            setReportDraft(null);
+            setRoutePoints([]);
+          }}
           className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur ${
-            reportMode ? "border-[#39FF14] bg-[#39FF14]/20 text-[#39FF14]" : "border-gray-600 bg-neutral-950/80 text-gray-300"
+            mode === "report" ? "border-[#39FF14] bg-[#39FF14]/20 text-[#39FF14]" : "border-gray-600 bg-neutral-950/80 text-gray-300"
           }`}
         >
-          {reportMode ? "لغو گزارش" : "گزارش روی نقشه"}
+          {mode === "report" ? "لغو گزارش" : "گزارش روی نقشه"}
+        </button>
+        <button
+          onClick={() => {
+            setMode((m) => (m === "route" ? "none" : "route"));
+            setRoutePoints([]);
+            setReportDraft(null);
+          }}
+          className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur ${
+            mode === "route" ? "border-[#39FF14] bg-[#39FF14]/20 text-[#39FF14]" : "border-gray-600 bg-neutral-950/80 text-gray-300"
+          }`}
+        >
+          {mode === "route" ? "لغو مسیر" : "پیش‌نمایش مسیر"}
         </button>
       </div>
+
+      {mode === "route" && (
+        <div className="absolute bottom-4 left-1/2 z-30 w-[min(360px,90vw)] -translate-x-1/2 rounded-xl border border-[#39FF14]/30 bg-neutral-950/95 p-4 text-sm text-gray-200 shadow-xl backdrop-blur">
+          {routePoints.length < 2 ? (
+            <p>{routePoints.length === 0 ? "مبدا را روی نقشه انتخاب کنید." : "مقصد را روی نقشه انتخاب کنید."}</p>
+          ) : routeLoading ? (
+            <p className="text-[#39FF14]">در حال محاسبه مسیر...</p>
+          ) : routeResult ? (
+            <>
+              <p className="font-bold text-[#39FF14]">
+                {(routeResult.distanceMeters / 1000).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} کیلومتر
+                {" · "}
+                {Math.round(routeResult.durationSeconds / 60).toLocaleString("fa-IR")} دقیقه
+              </p>
+              {routeResult.isEstimate && (
+                <p className="mt-1 text-xs text-gray-400">
+                  تخمین مسیر مستقیم (نسخه آزمایشی فاز ۱) -- بر اساس شبکه واقعی جاده‌ها نیست.
+                </p>
+              )}
+              <button onClick={() => setRoutePoints([])} className="mt-2 w-full rounded-lg border border-gray-600 px-3 py-2 text-gray-300">
+                انتخاب دوباره
+              </button>
+            </>
+          ) : (
+            <p className="text-red-400">محاسبه مسیر با خطا مواجه شد.</p>
+          )}
+        </div>
+      )}
 
       <div className="absolute left-4 top-4 z-30 max-h-[70vh] overflow-y-auto rounded-xl border border-[#39FF14]/20 bg-neutral-950/80 p-3 text-sm text-gray-200 backdrop-blur">
         <p className="mb-2 font-bold text-[#39FF14]">دسته‌بندی‌ها</p>
