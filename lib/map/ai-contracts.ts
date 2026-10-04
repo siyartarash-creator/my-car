@@ -10,6 +10,7 @@ import { boundingBox, haversineMeters } from "./geo";
 import { StraightLineRoutingAdapter } from "./adapters/routing-straight-line";
 import { DemoTilesAdapter } from "./adapters/tiles-demo";
 import type { CapabilityResult, LatLng, MapFeature, MapServiceLocation } from "./types";
+import type { GeocodeResult } from "./ports";
 
 const routingPort = new StraightLineRoutingAdapter();
 const tilesPort = new DemoTilesAdapter();
@@ -131,6 +132,16 @@ export async function getNearbyFeatures(
     }))
     .filter((f) => haversineMeters(center, f) <= radiusMeters);
   return { status: "ok", data: results };
+}
+
+// Calls this app's own /api/map/geocode proxy, never Nominatim directly --
+// the browser can't set the User-Agent header Nominatim's usage policy
+// requires, and routing every caller (Map UI, AI tools) through one
+// server-side endpoint keeps the provider-specific payload (and its rate
+// limit) in one place, per the provider-isolation rule in lib/map/ports.ts.
+export async function searchPlaces(query: string): Promise<CapabilityResult<GeocodeResult[]>> {
+  const res = await fetch(`/api/map/geocode?q=${encodeURIComponent(query)}`, { headers: { Accept: "application/json" } });
+  return (await res.json()) as CapabilityResult<GeocodeResult[]>;
 }
 
 // The one write tool: submits a pending report. Never writes map_features

@@ -17,7 +17,10 @@ export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reas
     enabled: true,
     reason: "Phase 1 prototype: great-circle distance/duration estimate, not road-aware",
   },
-  geocoding: { enabled: false, reason: "No $0 geocoding provider activated in Phase 1" },
+  geocoding: {
+    enabled: true,
+    reason: "Phase 2: $0 OSM Nominatim via a rate-limited server-side proxy (app/api/map/geocode)",
+  },
   traffic: { enabled: false, reason: "Live traffic is out of Phase 1 scope" },
   weather: { enabled: false, reason: "Route/destination weather is out of Phase 1 scope" },
   truck_routing: { enabled: false, reason: "Truck/road restriction evaluation is out of Phase 1 scope" },

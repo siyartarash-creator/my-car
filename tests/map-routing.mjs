@@ -38,11 +38,15 @@ ok(box.minLat < tehran.lat && tehran.lat < box.maxLat, 'bounding box contains it
 ok(box.minLng < tehran.lng && tehran.lng < box.maxLng, 'bounding box contains its own center (lng)');
 
 // --- Capability registry regression: nothing out-of-scope silently enabled ---
-for (const cap of ['geocoding', 'traffic', 'weather', 'truck_routing', 'live_navigation']) {
-  ok(!capabilities.isCapabilityEnabled(cap), `${cap} must stay disabled in Phase 1`);
+// geocoding was activated in Phase 2 item B (OSM Nominatim via a
+// rate-limited server-side proxy); everything still out of the approved
+// Phase 2 scope must stay disabled.
+for (const cap of ['traffic', 'weather', 'truck_routing', 'live_navigation']) {
+  ok(!capabilities.isCapabilityEnabled(cap), `${cap} must stay disabled`);
 }
 ok(capabilities.isCapabilityEnabled('tiles'), 'tiles capability enabled');
 ok(capabilities.isCapabilityEnabled('routing_preview'), 'routing_preview capability enabled');
+ok(capabilities.isCapabilityEnabled('geocoding'), 'geocoding capability enabled (Phase 2 item B)');
 
 // --- RoutingPort: the shipped $0 adapter -------------------------------
 const routingAdapter = new routingAdapterMod.StraightLineRoutingAdapter();

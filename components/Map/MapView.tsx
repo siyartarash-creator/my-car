@@ -13,9 +13,9 @@ if (typeof window !== "undefined") {
   maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
 }
 import { supabase } from "@/lib/supabase";
-import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, previewRoute, submitCommunityReport } from "@/lib/map/ai-contracts";
+import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, previewRoute, searchPlaces, submitCommunityReport } from "@/lib/map/ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
-import type { RoutePreview } from "@/lib/map/ports";
+import type { GeocodeResult, RoutePreview } from "@/lib/map/ports";
 
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
@@ -46,6 +46,9 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [routePoints, setRoutePoints] = useState<LatLng[]>([]);
   const [routeResult, setRouteResult] = useState<RoutePreview | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GeocodeResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const categoryById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
   const loadNearby = useCallback(async (center: LatLng) => {
@@ -115,6 +118,21 @@ export default function MapView({ categories }: { categories: Category[] }) {
       .finally(() => { if (!cancelled) setRouteLoading(false); });
     return () => { cancelled = true; };
   }, [routePoints]);
+
+  // Debounced place search (OSM Nominatim via /api/map/geocode). Loading
+  // state is set in handleSearchChange (a plain event handler) rather than
+  // here, so nothing calls setState synchronously at the top of an effect.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) return;
+    const timer = setTimeout(() => {
+      searchPlaces(q)
+        .then((res) => setSearchResults(res.status === "ok" ? res.data : []))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearchLoading(false));
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Draw/update the route line as a GeoJSON source+layer once the map is ready.
   useEffect(() => {
@@ -195,6 +213,20 @@ export default function MapView({ categories }: { categories: Category[] }) {
     );
   }, [loadNearby]);
 
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (value.trim().length < 2) { setSearchResults([]); setSearchLoading(false); }
+    else setSearchLoading(true);
+  };
+
+  const selectSearchResult = (result: GeocodeResult) => {
+    const center: LatLng = { lat: result.lat, lng: result.lng };
+    mapRef.current?.flyTo({ center: [center.lng, center.lat], zoom: 14 });
+    loadNearby(center);
+    setSearchQuery(result.label);
+    setSearchResults([]);
+  };
+
   const toggleCategory = (id: number) => {
     setActiveCategoryIds((prev) => {
       const next = new Set(prev);
@@ -234,6 +266,34 @@ export default function MapView({ categories }: { categories: Category[] }) {
           {errorMessage}
         </div>
       )}
+
+      <div className="absolute left-1/2 top-4 z-30 w-[min(320px,70vw)] -translate-x-1/2">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="جستجوی مکان..."
+          dir="rtl"
+          className="w-full rounded-full border border-[#39FF14]/30 bg-neutral-950/90 px-4 py-2 text-sm text-gray-100 shadow backdrop-blur outline-none focus:border-[#39FF14]"
+        />
+        {(searchLoading || searchResults.length > 0) && (
+          <div className="mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#39FF14]/20 bg-neutral-950/95 text-sm text-gray-200 shadow-xl backdrop-blur">
+            {searchLoading ? (
+              <p className="p-3 text-gray-400">در حال جستجو...</p>
+            ) : (
+              searchResults.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => selectSearchResult(r)}
+                  className="block w-full truncate px-3 py-2 text-right hover:bg-[#39FF14]/10"
+                >
+                  {r.label}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="absolute right-4 top-4 z-30 flex flex-col gap-2">
         <button
