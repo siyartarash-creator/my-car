@@ -9,6 +9,8 @@ export type MapCapability =
   | "traffic"
   | "weather"
   | "truck_routing"
+  | "truck_restriction_advisory"
+  | "multi_stop_routing"
   | "live_navigation";
 
 export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reason: string }> = {
@@ -21,10 +23,23 @@ export const CAPABILITY_REGISTRY: Record<MapCapability, { enabled: boolean; reas
     enabled: true,
     reason: "Phase 2: $0 OSM Nominatim via a rate-limited server-side proxy (app/api/map/geocode)",
   },
-  traffic: { enabled: false, reason: "Live traffic is out of Phase 1 scope" },
-  weather: { enabled: false, reason: "Route/destination weather is out of Phase 1 scope" },
-  truck_routing: { enabled: false, reason: "Truck/road restriction evaluation is out of Phase 1 scope" },
-  live_navigation: { enabled: false, reason: "Turn-by-turn live navigation is out of Phase 1 scope" },
+  traffic: { enabled: false, reason: "Live traffic is out of Phase 3 scope" },
+  weather: { enabled: false, reason: "Route/destination weather is out of Phase 3 scope" },
+  truck_routing: {
+    enabled: false,
+    reason:
+      "Native, restriction-validated truck routing (a road-aware engine that plans around height/weight/width limits) is not implemented -- no routing engine consumes map_road_restrictions yet",
+  },
+  truck_restriction_advisory: {
+    enabled: true,
+    reason:
+      "Phase 3 Part 1, $0: known verified restrictions (map_road_restrictions, feature status=verified) near the requested origin/destination/waypoints are surfaced as warnings. The route itself is still the straight-line estimate and does NOT route around them -- see RoutePreview.routingMode",
+  },
+  multi_stop_routing: {
+    enabled: true,
+    reason: "Phase 3 Part 1, $0: waypoints are chained in request order through the straight-line estimator; no stop-order optimization or real road engine yet",
+  },
+  live_navigation: { enabled: false, reason: "Turn-by-turn live navigation is out of Phase 3 Part 1 scope" },
 };
 
 export function isCapabilityEnabled(capability: MapCapability): boolean {

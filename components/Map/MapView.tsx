@@ -16,7 +16,7 @@ if (typeof window !== "undefined") {
 import { supabase } from "@/lib/supabase";
 import { getTileStyle, getNearbyFeatures, getNearbyServiceLocations, previewRoute, searchPlaces, submitCommunityReport } from "@/lib/map/ai-contracts";
 import type { LatLng, MapFeature, MapServiceLocation } from "@/lib/map/types";
-import type { GeocodeResult, RoutePreview } from "@/lib/map/ports";
+import type { GeocodeResult, RoutePreview, VehicleType } from "@/lib/map/ports";
 
 const ROUTE_SOURCE_ID = "map-route-preview";
 const ROUTE_LAYER_ID = "map-route-preview-line";
@@ -45,6 +45,7 @@ export default function MapView({ categories }: { categories: Category[] }) {
   const [reportDraft, setReportDraft] = useState<{ point: LatLng; description: string } | null>(null);
   const [reportStatus, setReportStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [routePoints, setRoutePoints] = useState<LatLng[]>([]);
+  const [routeVehicle, setRouteVehicle] = useState<VehicleType>("car");
   const [routeResult, setRouteResult] = useState<RoutePreview | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -113,12 +114,12 @@ export default function MapView({ categories }: { categories: Category[] }) {
   useEffect(() => {
     if (routePoints.length !== 2) return;
     let cancelled = false;
-    previewRoute(routePoints[0], routePoints[1])
+    previewRoute(supabase, { origin: routePoints[0], destination: routePoints[1], vehicle: routeVehicle })
       .then((res) => { if (!cancelled) setRouteResult(res.status === "ok" ? res.data : null); })
       .catch(() => { if (!cancelled) setErrorMessage("محاسبه مسیر با خطا مواجه شد."); })
       .finally(() => { if (!cancelled) setRouteLoading(false); });
     return () => { cancelled = true; };
-  }, [routePoints]);
+  }, [routePoints, routeVehicle]);
 
   // Draw/update the route line as a GeoJSON source+layer once the map is ready.
   useEffect(() => {
@@ -351,6 +352,23 @@ export default function MapView({ categories }: { categories: Category[] }) {
 
       {mode === "route" && (
         <div className="absolute bottom-4 left-1/2 z-30 w-[min(360px,90vw)] -translate-x-1/2 rounded-xl border border-[#39FF14]/30 bg-neutral-950/95 p-4 text-sm text-gray-200 shadow-xl backdrop-blur">
+          <div className="mb-2 flex gap-1.5">
+            {([
+              ["car", "سبک"],
+              ["motorcycle", "موتور"],
+              ["truck", "کامیون"],
+            ] as [VehicleType, string][]).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setRouteVehicle(v)}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  routeVehicle === v ? "border-[#39FF14] bg-[#39FF14]/20 text-[#39FF14]" : "border-gray-600 text-gray-400"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {routePoints.length < 2 ? (
             <p>{routePoints.length === 0 ? "مبدا را روی نقشه انتخاب کنید." : "مقصد را روی نقشه انتخاب کنید."}</p>
           ) : routeLoading ? (
@@ -362,10 +380,29 @@ export default function MapView({ categories }: { categories: Category[] }) {
                 {" · "}
                 {Math.round(routeResult.durationSeconds / 60).toLocaleString("fa-IR")} دقیقه
               </p>
-              {routeResult.isEstimate && (
+              {routeResult.routingMode === "advisory_estimate" && (
                 <p className="mt-1 text-xs text-gray-400">
-                  تخمین مسیر مستقیم (نسخه آزمایشی فاز ۱) -- بر اساس شبکه واقعی جاده‌ها نیست.
+                  تخمین مسیر مستقیم (نسخه آزمایشی) -- بر اساس شبکه واقعی جاده‌ها نیست.
                 </p>
+              )}
+              {routeVehicle === "truck" && routeResult.restrictionWarnings.length === 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  محدودیت تاییدشده‌ای در نزدیکی این مسیر ثبت نشده (این مسیر بر اساس محدودیت‌ها تنظیم نمی‌شود).
+                </p>
+              )}
+              {routeVehicle === "truck" && routeResult.restrictionWarnings.length > 0 && (
+                <div className="mt-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs text-yellow-300">
+                  <p className="font-bold">هشدار (فقط اطلاع‌رسانی، مسیر بر اساس آن تغییر نمی‌کند):</p>
+                  {routeResult.restrictionWarnings.map((w, i) => (
+                    <p key={i} className={w.severity === "exceeds_profile" ? "font-bold text-red-400" : undefined}>
+                      {w.severity === "exceeds_profile" ? "⚠ " : ""}
+                      {w.restrictionType}
+                      {w.maxValue != null ? ` ≤ ${w.maxValue}${w.unit ?? ""}` : ""}
+                      {w.note ? ` — ${w.note}` : ""}
+                      {w.severity === "unspecified" ? " (برای مقایسه، ابعاد کامیون مشخص نشده)" : ""}
+                    </p>
+                  ))}
+                </div>
               )}
               <button onClick={() => setRoutePoints([])} className="mt-2 w-full rounded-lg border border-gray-600 px-3 py-2 text-gray-300">
                 انتخاب دوباره

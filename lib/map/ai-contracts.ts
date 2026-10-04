@@ -9,8 +9,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { boundingBox, haversineMeters } from "./geo";
 import { StraightLineRoutingAdapter } from "./adapters/routing-straight-line";
 import { DemoTilesAdapter } from "./adapters/tiles-demo";
+import { isCapabilityEnabled } from "./capabilities";
 import type { CapabilityResult, LatLng, MapFeature, MapServiceLocation } from "./types";
-import type { GeocodeResult } from "./ports";
+import type { GeocodeResult, RestrictionWarning, RoutePreview, RouteRequest, TruckProfile } from "./ports";
 
 const routingPort = new StraightLineRoutingAdapter();
 const tilesPort = new DemoTilesAdapter();
@@ -19,8 +20,98 @@ export function getTileStyle() {
   return tilesPort.getStyle();
 }
 
-export async function previewRoute(origin: LatLng, destination: LatLng) {
-  return routingPort.previewRoute(origin, destination);
+// Normalizes a restriction's free-text unit to the SI unit truckProfile
+// uses (meters for height/width/length, kg for weight), so a comparison
+// against the caller's profile is only attempted when the unit is one we
+// actually recognize -- an unrecognized unit falls back to "unspecified"
+// rather than risking a wrong exceeds/doesn't-exceed claim.
+function normalizeToSi(restrictionType: RestrictionWarning["restrictionType"], value: number, unit: string | null): number | null {
+  const u = (unit ?? "").trim().toLowerCase();
+  if (restrictionType === "weight") {
+    if (u === "kg") return value;
+    if (u === "t" || u === "ton" || u === "tonne" || u === "tonnes") return value * 1000;
+    return null;
+  }
+  if (restrictionType === "height" || restrictionType === "width" || restrictionType === "length") {
+    if (u === "m" || u === "meter" || u === "meters" || u === "metre" || u === "metres") return value;
+    if (u === "cm") return value / 100;
+    return null;
+  }
+  return null;
+}
+
+const PROFILE_FIELD_BY_RESTRICTION: Partial<Record<RestrictionWarning["restrictionType"], keyof TruckProfile>> = {
+  height: "heightM",
+  width: "widthM",
+  length: "lengthM",
+  weight: "grossWeightKg",
+};
+
+function severityFor(
+  restrictionType: RestrictionWarning["restrictionType"],
+  maxValue: number | null,
+  unit: string | null,
+  truckProfile: TruckProfile | undefined,
+): RestrictionWarning["severity"] {
+  const field = PROFILE_FIELD_BY_RESTRICTION[restrictionType];
+  if (!field) return "info"; // vehicle_class / other: no directly comparable dimension
+  const profileValue = truckProfile?.[field];
+  if (typeof profileValue !== "number" || maxValue == null) return "unspecified";
+  const normalizedMax = normalizeToSi(restrictionType, maxValue, unit);
+  if (normalizedMax == null) return "unspecified"; // unrecognized unit -- don't guess
+  return profileValue > normalizedMax ? "exceeds_profile" : "info";
+}
+
+// Truck restriction warnings are advisory-only (see
+// truck_restriction_advisory in lib/map/capabilities.ts): they never change
+// the route geometry/duration above, only surface known verified
+// restrictions near the requested points for the caller to display.
+async function getRestrictionWarnings(
+  client: SupabaseClient,
+  request: RouteRequest,
+): Promise<RestrictionWarning[]> {
+  if (!isCapabilityEnabled("truck_restriction_advisory")) return [];
+  const points = [request.origin, ...(request.waypoints ?? []), request.destination];
+  const lats = points.map((p) => p.lat);
+  const lngs = points.map((p) => p.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const { data, error } = await client
+    .from("map_road_restrictions")
+    .select("restriction_type, max_value, unit, note, map_features!inner(lat, lng, status)")
+    .eq("map_features.status", "verified")
+    .gte("map_features.lat", minLat)
+    .lte("map_features.lat", maxLat)
+    .gte("map_features.lng", minLng)
+    .lte("map_features.lng", maxLng);
+  if (error) throw error;
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const restrictionType = row.restriction_type as RestrictionWarning["restrictionType"];
+    const maxValue = row.max_value as number | null;
+    const unit = row.unit as string | null;
+    return {
+      restrictionType,
+      maxValue,
+      unit,
+      note: row.note as string | null,
+      // RLS on map_road_restrictions only returns rows tied to a verified
+      // feature to a non-admin caller, so a readable row is always verified.
+      verified: true,
+      severity: severityFor(restrictionType, maxValue, unit, request.truckProfile),
+    };
+  });
+}
+
+export async function previewRoute(
+  client: SupabaseClient,
+  request: RouteRequest,
+): Promise<CapabilityResult<RoutePreview>> {
+  const result = await routingPort.previewRoute(request);
+  if (result.status !== "ok" || request.vehicle !== "truck") return result;
+  const restrictionWarnings = await getRestrictionWarnings(client, request);
+  return { ...result, data: { ...result.data, restrictionWarnings } };
 }
 
 // Postgres "undefined_function" -- raised when the DB-native proximity
