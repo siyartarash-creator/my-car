@@ -3,17 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/copy-maplibre-worker.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs",
-    "test:admin-seed": "node tests/seed-routine-dataset.mjs"
+    "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs && node tests/map-foundation.mjs && node tests/map-ingestion.mjs && node tests/map-routing.mjs && node tests/map-phase2-lifecycle.mjs && node tests/map-geocode-route.mjs",
+    "test:admin-seed": "node tests/seed-routine-dataset.mjs",
+    "test:map": "node scripts/test-map.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
+    "maplibre-gl": "^6.11.2",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"

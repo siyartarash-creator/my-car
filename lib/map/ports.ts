@@ -1,0 +1,183 @@
+// Provider ports: the only boundary through which Map code may depend on
+// an external map/routing/weather provider. UI code and AI contracts call
+// these interfaces, never a provider SDK or payload shape directly, so a
+// provider can be swapped (Provider A -> Provider B -> self-hosted) without
+// touching the canonical schema, the UI, or the AI-facing contracts.
+import type { CapabilityResult, LatLng } from "./types";
+
+export type TileStyle = {
+  // A MapLibre style URL or inline style object. Kept opaque here so the
+  // UI doesn't need to know which provider produced it.
+  styleUrl: string;
+  attribution: string;
+};
+
+export interface TilesPort {
+  getStyle(): CapabilityResult<TileStyle>;
+}
+
+export type RouteStep = { instruction: string; distanceMeters: number };
+
+export type VehicleType = "car" | "motorcycle" | "truck";
+
+// Structured truck context (MC1 Phase 3 Part 1). Every field is optional --
+// a caller may ask for truck-aware warnings with only the fields it knows.
+export type TruckProfile = {
+  heightM?: number;
+  widthM?: number;
+  lengthM?: number;
+  grossWeightKg?: number;
+  axleCount?: number;
+  axleLoadKg?: number;
+  hazmat?: boolean;
+};
+
+export type RoutePreferences = {
+  routeType?: "fastest" | "shortest";
+  avoidHighways?: boolean;
+  avoidTolls?: boolean;
+};
+
+export type RouteRequest = {
+  origin: LatLng;
+  destination: LatLng;
+  // Ordered intermediate stops between origin and destination. Multi-stop
+  // is additive: a RoutingPort that can't optimize stop order may still
+  // chain them in the given order.
+  waypoints?: LatLng[];
+  vehicle?: VehicleType; // defaults to "car" if omitted
+  truckProfile?: TruckProfile;
+  preferences?: RoutePreferences;
+};
+
+export type RestrictionWarning = {
+  restrictionType: "height" | "weight" | "width" | "length" | "vehicle_class" | "other";
+  maxValue: number | null;
+  unit: string | null;
+  note: string | null;
+  // true iff the restriction is attached to a verified map_features row --
+  // RLS on map_road_restrictions only returns such rows to a non-admin
+  // caller, so this is always true for anything a client can actually read.
+  verified: boolean;
+  // "exceeds_profile": the caller's truckProfile has a matching dimension
+  // (height/width/length/grossWeight) that numerically exceeds maxValue --
+  // a real comparison against caller-supplied data, not an inference about
+  // the road. "unspecified": caller didn't supply that dimension, so no
+  // comparison could be made. "info": restriction type has no directly
+  // comparable truckProfile field (e.g. vehicle_class, other).
+  severity: "exceeds_profile" | "unspecified" | "info";
+};
+
+export type RoutePreview = {
+  distanceMeters: number;
+  durationSeconds: number;
+  // GeoJSON order: [lng, lat] -- this is the one place this module uses
+  // lng-first, matching the GeoJSON LineString spec.
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+  steps: RouteStep[];
+  isEstimate: boolean; // true until a real road-aware provider is activated
+  // "native_validated": a road-aware engine computed and constraint-checked
+  // this route for the requested vehicle. "advisory_estimate": distance/
+  // duration are a straight-line guess and/or restriction warnings are
+  // informational only -- the route does NOT route around them. Every
+  // route today is advisory_estimate; no native engine is activated yet.
+  routingMode: "native_validated" | "advisory_estimate";
+  // Alternate routes, when the active RoutingPort can produce more than
+  // one. Always empty with the straight-line adapter (only one path is
+  // geometrically possible between two points).
+  alternates: RoutePreview[];
+  // Whether request.preferences (routeType/avoidHighways/avoidTolls) could
+  // actually change this route. False for every RoutingPort that has no
+  // road graph to route around anything with -- the straight-line adapter
+  // always reports false rather than silently ignoring the request.
+  preferencesHonored: boolean;
+  // Populated only when vehicle === "truck" and a verified restriction lies
+  // near the requested route. Never used to alter the geometry/duration
+  // above -- see routingMode.
+  restrictionWarnings: RestrictionWarning[];
+};
+
+export interface RoutingPort {
+  previewRoute(request: RouteRequest): Promise<CapabilityResult<RoutePreview>>;
+}
+
+export type GeocodeResult = { label: string; lat: number; lng: number };
+export interface GeocodingPort {
+  search(query: string): Promise<CapabilityResult<GeocodeResult[]>>;
+}
+
+export type TrafficSegment = { lat: number; lng: number; level: "free" | "moderate" | "heavy" };
+
+// Phase 3 Part 2: every TrafficPort result carries its own provenance
+// instead of a bare segment list, so a caller can render "live as of
+// 2 minutes ago, provider X, 80% confidence" or an honest degraded state
+// -- never silently treat a stale/low-confidence snapshot as current.
+export type TrafficSnapshot = {
+  segments: TrafficSegment[];
+  source: string; // provider/adapter identifier, e.g. "none" while disabled
+  observedAt: string; // ISO timestamp the snapshot reflects, not "now"
+  confidence: number; // 0-1
+};
+export interface TrafficPort {
+  getSegments(bbox: [LatLng, LatLng]): Promise<CapabilityResult<TrafficSnapshot>>;
+}
+
+export type WeatherHazards = {
+  snowRisk: boolean | null;
+  iceRisk: boolean | null;
+  fog: boolean | null;
+  heavyRain: boolean | null;
+  floodRisk: boolean | null;
+  severeWind: boolean | null;
+};
+
+export type WeatherSnapshot = {
+  point: LatLng;
+  tempC: number;
+  condition: string;
+  hazards: WeatherHazards;
+  source: string;
+  observedAt: string;
+  confidence: number;
+};
+export interface WeatherPort {
+  getCurrent(point: LatLng): Promise<CapabilityResult<WeatherSnapshot>>;
+  // Sampled points along a route (e.g. origin, waypoints, destination, or
+  // evenly-spaced samples) -- a provider-neutral shape for "route weather",
+  // not tied to how any one provider samples a polyline.
+  getAlongRoute(points: LatLng[]): Promise<CapabilityResult<WeatherSnapshot[]>>;
+}
+
+// Read vs. write tools stay separated at the port level too: every port
+// above is read-only by construction (no port here ever writes canonical
+// data). Community submissions go through the submitCommunityReport
+// contract in ai-contracts.ts, which calls a security-definer RPC, never a
+// provider port.
+
+// Phase 3 Part 3: Map-side advertising architecture only. CROSS-DOMAIN
+// DEPENDENCY -- real ad inventory requires a registered-business
+// commercial/ad-purchase backend that doesn't exist yet (it would belong
+// to the Store/Services domain, not Map). This contract exists so Map can
+// slot a real source in later without any caller (UI or AI) changing; see
+// map_advertising in capabilities.ts (disabled).
+export type AdTargeting = {
+  center: LatLng;
+  radiusMeters?: number;
+  // A route corridor (e.g. a RoutePreview.geometry's coordinates as
+  // LatLng) -- an ad relevant along this path rather than only at a point.
+  corridor?: LatLng[];
+  categorySlug?: string;
+  vehicle?: VehicleType;
+};
+
+export type AdCreative = {
+  id: string;
+  label: string; // always rendered with an explicit "Ad"/"تبلیغ" marker by the caller -- see MapView.tsx
+  businessProfileId: string; // must be a registered MY CAR business -- never an arbitrary external advertiser
+  lat: number;
+  lng: number;
+};
+
+export interface AdPort {
+  getAdsForTargeting(targeting: AdTargeting): Promise<CapabilityResult<AdCreative[]>>;
+}
