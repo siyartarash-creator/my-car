@@ -30,6 +30,8 @@ const TEST_FILES = [
   // honesty, retention/deletion + atomic rate-limit concurrency
   "tests/map-phase3-audit-corrective.mjs",
   "tests/map-phase3-audit-corrective-db.mjs",
+  // Phase 3 final audit: automatic cleanup scheduling + delete-failure UI honesty
+  "tests/map-phase3-final-audit.mjs",
 ];
 
 const results = [];

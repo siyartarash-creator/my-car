@@ -98,7 +98,10 @@ export default function MapView({ categories }: { categories: Category[] }) {
 
   // --- Phase 3 Part 3: roadside location handoff (opt-in, default off) ---
   const [roadsideShareId, setRoadsideShareId] = useState<number | null>(null);
-  const [roadsideStatus, setRoadsideStatus] = useState<"idle" | "sharing" | "shared" | "error">("idle");
+  // "deleting"/"delete_error" are distinct from "sharing"/"error" (which
+  // are about *starting* a share) so a failed stop never gets mistaken
+  // for a failed start, or vice versa -- see handleStopRoadsideShare.
+  const [roadsideStatus, setRoadsideStatus] = useState<"idle" | "sharing" | "shared" | "error" | "deleting" | "delete_error">("idle");
 
   // --- Phase 3 Part 4: offline cache (clearly labeled, never silent) -----
   const [offlineSnapshotAt, setOfflineSnapshotAt] = useState<string | null>(null);
@@ -426,13 +429,25 @@ export default function MapView({ categories }: { categories: Category[] }) {
   // revoke, which only ever controlled read access via RLS and left the
   // coordinates in the table) -- the UI's "stop sharing" action should
   // actually remove the data, not just hide it.
+  //
+  // Phase 3 final audit fix (delete-failure honesty): local state is
+  // cleared ONLY after the RPC actually succeeds. The previous version
+  // cleared roadsideShareId/roadsideStatus in a `finally` block, so a
+  // failed delete_location_share call (network error, RLS/ownership
+  // mismatch, anything) still showed the UI as "not sharing" while the
+  // row -- and the real-world coordinates -- were still sitting in the
+  // database. On failure the share id is kept and roadsideStatus becomes
+  // "delete_error," which keeps the stop-sharing control visible and
+  // clickable for a retry, with an explicit failure banner.
   const handleStopRoadsideShare = useCallback(async () => {
     if (roadsideShareId == null) return;
+    setRoadsideStatus("deleting");
     try {
       await deleteLocationShare(supabase, roadsideShareId);
-    } finally {
       setRoadsideShareId(null);
       setRoadsideStatus("idle");
+    } catch {
+      setRoadsideStatus("delete_error");
     }
   }, [roadsideShareId]);
 
@@ -546,12 +561,18 @@ export default function MapView({ categories }: { categories: Category[] }) {
         </button>
         <button
           onClick={() => {
-            if (roadsideStatus === "shared") handleStopRoadsideShare();
+            // Phase 3 final audit fix: keyed off roadsideShareId (the real
+            // source of truth for "do I have an active share"), not
+            // roadsideStatus -- a failed delete leaves roadsideStatus as
+            // "delete_error" while the share is still active, and this
+            // button must still offer "stop sharing" (retry), not flip
+            // back to "start sharing."
+            if (roadsideShareId != null) handleStopRoadsideShare();
             else handleStartRoadsideShare();
           }}
-          disabled={roadsideStatus === "sharing"}
+          disabled={roadsideStatus === "sharing" || roadsideStatus === "deleting"}
           className={`rounded-full border px-4 py-2 text-sm font-bold shadow backdrop-blur disabled:opacity-50 ${
-            roadsideStatus === "shared" ? "border-red-500 bg-red-500/20 text-red-300" : "border-gray-600 bg-neutral-950/80 text-gray-300"
+            roadsideShareId != null ? "border-red-500 bg-red-500/20 text-red-300" : "border-gray-600 bg-neutral-950/80 text-gray-300"
           }`}
         >
           {/* Phase 3 audit fix (item 5): this was "درخواست کمک" (request
@@ -560,9 +581,11 @@ export default function MapView({ categories }: { categories: Category[] }) {
               below for the explicit dispatch-not-available statement. */}
           {roadsideStatus === "sharing"
             ? "در حال ارسال موقعیت..."
-            : roadsideStatus === "shared"
-              ? "توقف اشتراک‌گذاری موقعیت"
-              : "اشتراک‌گذاری موقعیت (خرابی)"}
+            : roadsideStatus === "deleting"
+              ? "در حال توقف اشتراک‌گذاری..."
+              : roadsideShareId != null
+                ? "توقف اشتراک‌گذاری موقعیت"
+                : "اشتراک‌گذاری موقعیت (خرابی)"}
         </button>
       </div>
 
@@ -570,6 +593,12 @@ export default function MapView({ categories }: { categories: Category[] }) {
         <div className="absolute left-1/2 top-16 z-30 w-[min(320px,80vw)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-neutral-950/95 p-3 text-xs text-red-200 shadow-xl backdrop-blur">
           <p>موقعیت شما به‌صورت موقت و قابل‌حذف ثبت شد (حداکثر ۲ ساعت). این موقعیت تا زمانی که آن را متوقف نکنید یا منقضی شود، فقط برای شما و ادمین قابل مشاهده است.</p>
           <p className="mt-1 font-bold">این یک درخواست کمک/امداد نیست -- سرویس اعزام خودکار در حال حاضر فعال نیست. برای کمک واقعی با خدمات امدادی تماس بگیرید.</p>
+        </div>
+      )}
+      {roadsideStatus === "delete_error" && (
+        <div className="absolute left-1/2 top-16 z-30 w-[min(320px,80vw)] -translate-x-1/2 rounded-xl border border-red-500/40 bg-neutral-950/95 p-3 text-xs text-red-300 shadow-xl backdrop-blur">
+          <p className="font-bold">توقف اشتراک‌گذاری ناموفق بود.</p>
+          <p className="mt-1">موقعیت شما همچنان به اشتراک گذاشته شده است -- این یعنی اشتراک‌گذاری متوقف نشده، نه اینکه متوقف شده. دوباره تلاش کنید.</p>
         </div>
       )}
       {roadsideStatus === "error" && (
