@@ -32,6 +32,64 @@ test.describe("guest and role entry points", () => {
     expect(authCalls).toBe(0);
   });
 
+  test("successful login does not race the pre-login identity state", async ({ page }) => {
+    const userId = "00000000-0000-4000-8000-000000000004";
+    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const accessToken = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
+      sub: userId,
+      aud: "authenticated",
+      role: "authenticated",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    })}.test-signature`;
+    const user = {
+      id: userId,
+      aud: "authenticated",
+      role: "authenticated",
+      email: "09123456789@mycar.local",
+      app_metadata: { provider: "email", providers: ["email"] },
+      user_metadata: { mobile: "09123456789", user_type: "rescuer" },
+      created_at: new Date(0).toISOString(),
+    };
+    let postLoginUserRequests = 0;
+
+    await page.route("**/auth/v1/token**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: accessToken,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "test-refresh-token",
+          user,
+        }),
+      });
+    });
+    await page.route("**/auth/v1/user", async (route) => {
+      postLoginUserRequests += 1;
+      if (postLoginUserRequests === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(user) });
+    });
+    await page.route("**/rest/v1/profiles**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/vnd.pgrst.object+json",
+        body: JSON.stringify({ name: "TEST BOT RESCUER", mobile: "09123456789", user_type: "rescuer", is_admin: false }),
+      });
+    });
+
+    await page.goto("/login");
+    await page.getByPlaceholder("09xxxxxxxxx").fill("09123456789");
+    await page.getByPlaceholder("••••••").fill("safe-pass-123");
+    await page.getByRole("button", { name: "ورود به حساب" }).click();
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: /TEST/ })).toBeVisible();
+    await page.waitForTimeout(1_250);
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
+
   test("double-click registration dispatches one signup request", async ({ page }) => {
     let signupCalls = 0;
     await page.route("**/auth/v1/signup", async (route) => {

@@ -2,12 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,7 +67,9 @@ export default function LoginPage() {
 
 
       setLoading(false);
-      router.push("/dashboard");
+      // Start a fresh document so AuthProvider hydrates from the persisted
+      // Supabase cookies instead of briefly reusing its pre-login guest state.
+      window.location.replace("/dashboard");
     } catch (err) {
       setError(
         `خطای غیرمنتظره: ${err instanceof Error ? err.message : "نامشخص"}`
