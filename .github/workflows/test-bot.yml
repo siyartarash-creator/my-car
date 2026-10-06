@@ -26,7 +26,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Install dependencies from the public npm registry
+        run: npm ci --registry=https://registry.npmjs.org/ --replace-registry-host=always --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: npm run test:bot
       - if: always()
@@ -64,7 +65,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Validate authenticated staging secret bindings
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            NEXT_PUBLIC_SUPABASE_ANON_KEY \
+            TEST_BOT_OWNER_MOBILE TEST_BOT_OWNER_PASSWORD \
+            TEST_BOT_SELLER_MOBILE TEST_BOT_SELLER_PASSWORD \
+            TEST_BOT_SERVICE_MOBILE TEST_BOT_SERVICE_PASSWORD \
+            TEST_BOT_RESCUER_MOBILE TEST_BOT_RESCUER_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            printf '::error::Missing authenticated staging secrets: %s\n' "$(IFS=,; echo "${missing[*]}")"
+            exit 1
+          fi
+      - name: Install dependencies from the public npm registry
+        run: npm ci --registry=https://registry.npmjs.org/ --replace-registry-host=always --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - name: Run authenticated staging gate
         run: npm run test:bot:staging
