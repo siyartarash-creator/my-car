@@ -11,7 +11,11 @@
     "typecheck": "tsc --noEmit --incremental false",
     "test:security": "node tests/database-security.mjs && node tests/write-boundary.mjs && node tests/map-foundation.mjs && node tests/map-ingestion.mjs && node tests/map-routing.mjs && node tests/map-phase2-lifecycle.mjs && node tests/map-geocode-route.mjs",
     "test:admin-seed": "node tests/seed-routine-dataset.mjs",
-    "test:map": "node scripts/test-map.mjs"
+    "test:map": "node scripts/test-map.mjs",
+    "test:e2e": "playwright test --grep-invert @staging",
+    "test:e2e:staging": "node --env-file-if-exists=.env.test-bot.local tests/test-bot/validate-staging.mjs && node --env-file-if-exists=.env.test-bot.local node_modules/@playwright/test/cli.js test --grep @staging",
+    "test:bot": "node scripts/test-bot.mjs",
+    "test:bot:staging": "node scripts/test-bot.mjs --staging"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -23,6 +27,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

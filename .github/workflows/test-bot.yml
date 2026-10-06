@@ -1,0 +1,79 @@
+name: MY CAR Test Bot
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-bot-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-mock-safe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:bot
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-car-test-bot-report
+          path: |
+            reports/test-bot/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  authenticated-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      TEST_BOT_TARGET: staging
+      TEST_BOT_STAGING_ACK: STAGING_ONLY
+      TEST_BOT_BASE_URL: https://dulcet-starlight-33ce57.netlify.app
+      TEST_BOT_ALLOWED_HOST: dulcet-starlight-33ce57.netlify.app
+      TEST_BOT_SUPABASE_URL: https://hhkwntnbycpbypsaqvrc.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.TEST_BOT_SUPABASE_ANON_KEY }}
+      TEST_BOT_OWNER_MOBILE: ${{ secrets.TEST_BOT_OWNER_MOBILE }}
+      TEST_BOT_OWNER_PASSWORD: ${{ secrets.TEST_BOT_OWNER_PASSWORD }}
+      TEST_BOT_SELLER_MOBILE: ${{ secrets.TEST_BOT_SELLER_MOBILE }}
+      TEST_BOT_SELLER_PASSWORD: ${{ secrets.TEST_BOT_SELLER_PASSWORD }}
+      TEST_BOT_SERVICE_MOBILE: ${{ secrets.TEST_BOT_SERVICE_MOBILE }}
+      TEST_BOT_SERVICE_PASSWORD: ${{ secrets.TEST_BOT_SERVICE_PASSWORD }}
+      TEST_BOT_RESCUER_MOBILE: ${{ secrets.TEST_BOT_RESCUER_MOBILE }}
+      TEST_BOT_RESCUER_PASSWORD: ${{ secrets.TEST_BOT_RESCUER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run authenticated staging gate
+        run: npm run test:bot:staging
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-car-test-bot-staging-report
+          path: |
+            reports/test-bot/report-staging.*
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
