@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
+import { getLoginRedirect } from "@/lib/safe-redirect";
 
 type MenuItem = {
   href: string;
@@ -25,7 +26,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const check = async () => {
       const userId = await getCurrentUserId();
       if (!userId) {
-        router.push("/login");
+         router.push(getLoginRedirect(`${pathname}${window.location.search}`));
         return;
       }
       const { data, error } = await supabase
@@ -50,7 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       setChecking(false);
     };
     check();
-  }, [router]);
+  }, [router, pathname]);
 
   if (checking) {
     return (
@@ -66,6 +67,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: "/admin", label: "داشبورد", icon: "📊" },
     { href: "/admin/products", label: "محصولات", icon: "📦" },
     { href: "/admin/products/new", label: "افزودن محصول", icon: "➕" },
+    { href: "/admin/search-dictionary", label: "واژه‌نامه جستجو", icon: "🔎" },
     {
       href: "/admin/product-requests",
       label: "درخواست‌ها",
@@ -74,6 +76,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     },
     { href: "/admin/orders", label: "سفارشات", icon: "🛍️" },
     { href: "/admin/users", label: "کاربران", icon: "👥" },
+    { href: "/admin/wallet", label: "کیف پول و امور مالی", icon: "💳" },
   ];
 
   return (

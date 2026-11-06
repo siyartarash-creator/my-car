@@ -42,35 +42,27 @@ export function ProductImageUploader({
 
     setUploading(true);
     const uploadedUrls: string[] = [];
+    const uploadedPaths: string[] = [];
+    let failed = false;
 
     try {
       for (const file of files) {
-        const ext = file.name.split(".").pop() || "jpg";
-        const fileName = `${Date.now()}-${Math.random()
-          .toString(36)
-          .substring(2, 10)}.${ext}`;
-        const filePath = `products/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("products")
-          .upload(filePath, file, {
-            upsert: false,
-            contentType: file.type,
-          });
-
-        if (uploadError) {
-          setError(`خطا در آپلود: ${uploadError.message}`);
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch("/api/admin/upload-image", { method: "POST", body });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || typeof result.url !== "string") {
+          setError(`خطا در آپلود: ${result.error || "فایل نامعتبر است"}`);
+          failed = true;
           break;
         }
-
-        const { data: urlData } = supabase.storage
-          .from("products")
-          .getPublicUrl(filePath);
-
-        uploadedUrls.push(urlData.publicUrl);
+        uploadedUrls.push(result.url);
+        if (typeof result.path === "string") uploadedPaths.push(result.path);
       }
 
-      if (uploadedUrls.length > 0) {
+      if (failed && uploadedPaths.length > 0) {
+        await supabase.storage.from("products").remove(uploadedPaths);
+      } else if (uploadedUrls.length > 0) {
         onChange([...images, ...uploadedUrls]);
       }
     } catch (err) {
@@ -151,15 +143,17 @@ export function ProductImageUploader({
                   <button
                     type="button"
                     onClick={() => moveImage(index, "up")}
+                    disabled={uploading}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-[#39FF14] text-black transition hover:bg-[#39FF14]/80"
                     title="جابجایی"
                   >
                     ←
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => removeImage(url, index)}
+                  <button
+                    type="button"
+                    onClick={() => removeImage(url, index)}
+                    disabled={uploading}
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-600"
                   title="حذف"
                 >
@@ -169,6 +163,7 @@ export function ProductImageUploader({
                   <button
                     type="button"
                     onClick={() => moveImage(index, "down")}
+                    disabled={uploading}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-[#39FF14] text-black transition hover:bg-[#39FF14]/80"
                     title="جابجایی"
                   >

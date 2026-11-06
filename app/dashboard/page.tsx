@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
-import { AdminCard } from "@/components/AdminCard";
+import { AdminCard } from "@/features/admin/components/AdminCard";
 import { SellerCard } from "@/components/SellerCard";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ProfileStatusCard } from "@/components/ProfileStatusCard";
@@ -24,7 +24,7 @@ const dashboardItems = [
     id: "rescue",
     icon: "🚨",
     title: "امداد سیار",
-    desc: "هرجا گیر کردی، امدادگر متخصص در کمترین زمان می‌رسه",
+    desc: "مسیر ثبت درخواست امداد سیار هنوز در نسخه فعلی فعال نیست",
     href: "/rescue",
     color: "from-red-500/20 to-red-400/5",
   },
@@ -32,7 +32,7 @@ const dashboardItems = [
     id: "services",
     icon: "🔧",
     title: "خدمات فنی",
-    desc: "تعمیرگاه، کارواش، تعویض روغنی و مراکز خدمات تخصصی",
+    desc: "فهرست و رزرو خدمات فنی هنوز در نسخه فعلی فعال نیست",
     href: "/services",
     color: "from-blue-500/20 to-blue-400/5",
   },
@@ -59,6 +59,14 @@ const dashboardItems = [
     desc: "سفارش‌های فعلی و قبلی‌ت رو مدیریت کن",
     href: "/orders",
     color: "from-orange-500/20 to-orange-400/5",
+  },
+  {
+    id: "wallet",
+    icon: "💳",
+    title: "کیف پول من",
+    desc: "موجودی، حساب‌های داخلی و تاریخچه تراکنش‌ها",
+    href: "/wallet",
+    color: "from-emerald-500/20 to-emerald-400/5",
   },
   {
     id: "news",
