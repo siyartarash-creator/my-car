@@ -4,10 +4,31 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Profile = { id: string; name: string; mobile: string; user_type: string };
-type Account = { id: string; profile_id: string | null; kind: string; code: string; is_active: boolean };
+type Account = { id: string; profile_id: string | null; kind: string; code: string | null; is_active: boolean };
 type LedgerEntry = { id: string; account_id: string; signed_amount: number; reason: string; source_type: string; source_id: string | null; created_at: string };
 
-const money = (value: number) => `${new Intl.NumberFormat("fa-IR").format(value)} ریال`;
+async function loadEntries() {
+  const pageSize = 1000;
+  const entries: LedgerEntry[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("ledger_entries")
+      .select("id,account_id,signed_amount,reason,source_type,source_id,created_at")
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error("entries");
+    entries.push(...((data ?? []) as LedgerEntry[]));
+    if ((data ?? []).length < pageSize) return entries;
+  }
+}
+
+async function loadHeld(userId: string) {
+  const { data, error } = await supabase.from("orders").select("final_price").eq("user_id", userId).eq("escrow_status", "held");
+  if (error) throw new Error("held");
+  return (data ?? []).reduce((sum, order) => sum + Number(order.final_price ?? 0), 0);
+}
+
+const money = (value: number) => `${new Intl.NumberFormat("fa-IR").format(value)} تومان`;
 const reasonTitle: Record<string, string> = { admin_charge: "شارژ دستی", order_wallet_payment: "پرداخت از کیف پول" };
 
 async function write(action: string, body: Record<string, unknown>) {
@@ -39,18 +60,17 @@ export function AdminWalletPanel() {
     setLoading(true);
     setError("");
     try {
-      const [profilesResult, accountsResult, entriesResult] = await Promise.all([
+      const [profilesResult, accountsResult] = await Promise.all([
         supabase.from("profiles").select("id,name,mobile,user_type").order("name"),
         supabase.from("ledger_accounts").select("id,profile_id,kind,code,is_active").order("created_at"),
-        supabase.from("ledger_entries").select("id,account_id,signed_amount,reason,source_type,source_id,created_at").order("created_at", { ascending: false }).limit(200),
       ]);
-      if (profilesResult.error || accountsResult.error || entriesResult.error) throw new Error("load");
+      const nextEntries = await loadEntries();
+      if (profilesResult.error || accountsResult.error) throw new Error("load");
       if (generation !== loadGeneration.current) return;
       setProfiles((profilesResult.data ?? []) as Profile[]);
       if (!selectedUser) setSelectedUser(profilesResult.data?.find((profile) => profile.user_type === "owner")?.id ?? profilesResult.data?.[0]?.id ?? "");
       const nextAccounts = (accountsResult.data ?? []) as Account[];
-      const nextEntries = (entriesResult.data ?? []) as LedgerEntry[];
-      if (generation !== loadGeneration.current) return;
+       if (generation !== loadGeneration.current) return;
       const nextBalances: Record<string, number> = {};
       for (const entry of nextEntries) nextBalances[entry.account_id] = (nextBalances[entry.account_id] ?? 0) + Number(entry.signed_amount);
       setAccounts(nextAccounts);
@@ -58,8 +78,9 @@ export function AdminWalletPanel() {
       setTransactions(nextEntries);
       if (requestedUser) {
         const customerAccountIds = nextAccounts.filter((account) => account.profile_id === requestedUser && account.kind === "profile").map((account) => account.id);
-        const available = customerAccountIds.reduce((sum, accountId) => sum + (nextBalances[accountId] ?? 0), 0);
-        setCustomerBalances({ available, held: 0 });
+         const available = customerAccountIds.reduce((sum, accountId) => sum + (nextBalances[accountId] ?? 0), 0);
+         const held = await loadHeld(requestedUser);
+         setCustomerBalances({ available, held });
       }
     } catch { if (generation === loadGeneration.current) { setCustomerBalances({ available: 0, held: 0 }); setError("اطلاعات مالی بارگذاری نشد"); } } finally { if (generation === loadGeneration.current) setLoading(false); }
   }, [selectedUser]);
@@ -90,7 +111,7 @@ export function AdminWalletPanel() {
           <h3 className="mb-4 text-lg font-bold text-[#39FF14]">شارژ دستی کیف پول</h3>
           <div className="space-y-3">
             <select value={selectedUser} onChange={(event) => { setSelectedUser(event.target.value); setCustomerBalances({ available: 0, held: 0 }); }} className="w-full rounded-lg border border-white/15 bg-black/30 p-3 text-white"><option value="">انتخاب کاربر</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} — {profile.mobile}</option>)}</select>
-            <input value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} inputMode="numeric" placeholder="مبلغ به ریال" className="w-full rounded-lg border border-white/15 bg-black/30 p-3 text-white" />
+             <input value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} inputMode="numeric" placeholder="مبلغ به تومان" className="w-full rounded-lg border border-white/15 bg-black/30 p-3 text-white" />
             <input value={creditReason} onChange={(event) => setCreditReason(event.target.value)} placeholder="دلیل شارژ" className="w-full rounded-lg border border-white/15 bg-black/30 p-3 text-white" />
             <input value={creditReference} onChange={(event) => setCreditReference(event.target.value)} placeholder="شماره مرجع" className="w-full rounded-lg border border-white/15 bg-black/30 p-3 text-white" />
             <button disabled={busy || loading || !selectedUser} onClick={() => void run("manual_credit", { user_id: selectedUser, amount: Number(creditAmount), reason: creditReason, reference: creditReference, key: crypto.randomUUID() }, "شارژ دستی ثبت شد")} className="w-full rounded-lg bg-[#39FF14] px-4 py-3 font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">ثبت شارژ دستی</button>
