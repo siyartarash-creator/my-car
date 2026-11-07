@@ -41,7 +41,8 @@ export async function refreshSession(request: NextRequest) {
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("redirect", pathname);
+    url.search = "";
+    url.searchParams.set("redirect", pathname + request.nextUrl.search);
     const redirect = NextResponse.redirect(url);
     response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
     Object.entries(cacheHeaders).forEach(([name,value]) => redirect.headers.set(name,value));
