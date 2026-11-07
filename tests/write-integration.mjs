@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import { load } from './helpers/load-typescript.mjs';
 export async function testWriteIntegration(db,buyer,seller,other) {
  let uid=buyer;
- const {POST}=load('app/api/write/[action]/route.ts',{
-  '@/lib/write-validation':load('lib/write-validation.ts'),
-  '@/lib/supabase-server':{createClient:async()=>({
-   auth:{getUser:async()=>({data:{user:uid?{id:uid}:null},error:null})},
-   rpc:async(name,args)=>{
+  const {POST}=load('app/api/write/[action]/route.ts',{
+   '@/lib/write-validation':load('lib/write-validation.ts'),
+   '@/features/shop/write-actions':load('features/shop/write-actions.ts'),
+   '@/features/finance/write-actions':load('features/finance/write-actions.ts'),
+   '@/features/rescue/write-actions':load('features/rescue/write-actions.ts'),
+   '@/lib/supabase-server':{createClient:async()=>({
+    auth:{getUser:async()=>({data:{user:uid?{id:uid}:null},error:null})},
+    from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:null,error:null})})})}),
+    rpc:async(name,args)=>{
     assert.match(name,/^[a-z_]+$/);
     const keys=Object.keys(args); keys.forEach(key=>assert.match(key,/^p_[a-z_]+$/));
     await db.exec('set role authenticated');

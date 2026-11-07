@@ -1,5 +1,12 @@
 import { createClient } from "@/lib/supabase-server";
 import { validateWrite } from "@/lib/write-validation";
+import type { WriteAction } from "@/lib/write-action";
+import { shopWriteActions } from "@/features/shop/write-actions";
+import { financeWriteActions } from "@/features/finance/write-actions";
+import { rescueWriteActions } from "@/features/rescue/write-actions";
+
+// Every action name is owned by exactly one module. validateWrite rejects unknown names before lookup.
+const writeActions: Record<string, WriteAction> = { ...shopWriteActions, ...financeWriteActions, ...rescueWriteActions };
 
 export async function POST(request: Request, { params }: { params: Promise<{ action: string }> }) {
   const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -30,27 +37,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     payload = validateWrite(action, JSON.parse(Buffer.concat(chunks).toString("utf8")));
   } catch { return reply({ error: "اطلاعات درخواست معتبر نیست" }, 400); }
   const v = payload;
-  if (action === "manual_credit") {
-    const account = await client.from("ledger_accounts").select("id").eq("profile_id", v.user_id).eq("kind", "profile").single();
-    if (account.error) return reply({ error: "حساب کیف پول کاربر پیدا نشد" }, 409);
-    v.account_id = account.data.id;
+  const writeAction = writeActions[action];
+  if (writeAction.prepare) {
+    const refusal = await writeAction.prepare(client, v);
+    if (refusal) return reply({ error: refusal }, 409);
   }
-  const calls: Record<string, { name: string; args: Record<string, unknown> }> = {
-    quote: { name: "quote_checkout", args: { p_items: v.items, p_coupon: v.coupon ?? null } },
-    checkout: { name: "place_order", args: { p_items: v.items, p_coupon: v.coupon ?? null, p_address: v.address, p_key: v.key, p_expected_total: v.expected_total } },
-    cancel: { name: "cancel_order", args: { p_order_id: v.order_id } },
-    fulfillment: { name: "advance_fulfillment", args: { p_order_id: v.order_id, p_status: v.status } },
-    wallet_pay: { name: "pay_order_from_wallet", args: { p_order_id: v.order_id, p_key: v.key } },
-    // The canonical refund RPC is admin-only and derives the original transfer from the order.
-    wallet_refund: { name: "admin_refund_order_escrow", args: { p_order_id: v.order_id, p_reason: v.reason, p_refund_transfer_id: null } },
-    manual_credit: { name: "admin_manual_wallet_entry", args: { p_account_id: v.account_id, p_direction: "charge", p_amount_toman: v.amount, p_reason: v.reason, p_tracking_reference: v.reference } },
-    test_rescue: { name: "admin_create_test_rescue_transaction", args: { p_user_id: v.user_id, p_amount: v.amount, p_reference: v.reference, p_idempotency_key: v.key } },
-    test_rescue_release: { name: "admin_release_test_rescue_transaction", args: { p_transaction_id: v.transaction_id } },
-    test_rescue_refund: { name: "admin_refund_test_rescue_transaction", args: { p_transaction_id: v.transaction_id, p_reason: v.reason, p_idempotency_key: v.key } },
-    offer: { name: "save_offer", args: { p_product_id:v.product_id,p_offer_id:v.offer_id??null,p_price:v.price,
-      p_discount_price:v.discount_price??null,p_stock:v.stock,p_warranty:v.warranty??null,p_shipping:v.shipping??null,p_notes:v.notes??null,p_hidden:v.hidden } },
-  };
-  const call = calls[action];
+  const call = writeAction.call(v);
   let result;
   try {
     result = await client.rpc(call.name, call.args);

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server.js";
 import { load } from "./helpers/load-typescript.mjs";
 const validation=load('lib/write-validation.ts');
+const shopActions=load('features/shop/write-actions.ts');
+const financeActions=load('features/finance/write-actions.ts');
+const rescueActions=load('features/rescue/write-actions.ts');
 let user={id:'test-user'},rpcError=null,lastCall=null,calls=0;
 const {POST}=load('app/api/write/[action]/route.ts',{
    '@/lib/write-validation':validation,
+   '@/features/shop/write-actions':shopActions,
+   '@/features/finance/write-actions':financeActions,
+   '@/features/rescue/write-actions':rescueActions,
    '@/lib/supabase-server':{createClient:async()=>({
     auth:{getUser:async()=>({data:{user},error:null})},
     from:()=>{const chain={select:()=>chain,eq:()=>chain,in:()=>chain,single:async()=>({data:{id:'account-id'},error:null}),maybeSingle:async()=>({data:null,error:null})};return chain;},
