@@ -5,15 +5,21 @@ const validation=load('lib/write-validation.ts');
 const shopActions=load('features/shop/write-actions.ts');
 const financeActions=load('features/finance/write-actions.ts');
 const rescueActions=load('features/rescue/write-actions.ts');
-let user={id:'test-user'},rpcError=null,lastCall=null,calls=0;
+const writeActionRegistry=load('lib/write-action.ts');
+assert.throws(()=>writeActionRegistry.registerWriteActions(shopActions.shopWriteActions,{quote:shopActions.shopWriteActions.quote}),/Duplicate write action registration: quote/);
+assert.deepEqual(Object.keys(writeActionRegistry.registerWriteActions(shopActions.shopWriteActions,financeActions.financeWriteActions,rescueActions.rescueWriteActions)).sort(),[
+ 'cancel','checkout','fulfillment','manual_credit','offer','quote','test_rescue','test_rescue_refund','test_rescue_release','wallet_pay','wallet_refund',
+].sort());
+let user={id:'test-user'},rpcError=null,lastCall=null,calls=0,accountLookupError=false,accountLookupThrows=false;
 const {POST}=load('app/api/write/[action]/route.ts',{
    '@/lib/write-validation':validation,
    '@/features/shop/write-actions':shopActions,
    '@/features/finance/write-actions':financeActions,
    '@/features/rescue/write-actions':rescueActions,
+   '@/lib/write-action':writeActionRegistry,
    '@/lib/supabase-server':{createClient:async()=>({
     auth:{getUser:async()=>({data:{user},error:null})},
-    from:()=>{const chain={select:()=>chain,eq:()=>chain,in:()=>chain,single:async()=>({data:{id:'account-id'},error:null}),maybeSingle:async()=>({data:null,error:null})};return chain;},
+    from:()=>{const chain={select:()=>chain,eq:()=>chain,in:()=>chain,single:async()=>{if(accountLookupThrows)throw new Error('private database error');return {data:accountLookupError?null:{id:'account-id'},error:accountLookupError?{message:'private database error'}:null}},maybeSingle:async()=>({data:null,error:null})};return chain;},
     rpc:async(name,args)=>{calls++;lastCall={name,args};return {data:{order_id:7},error:rpcError}},
  })},
 });
@@ -22,13 +28,14 @@ const walletBase={order_id:7,allocations:[{account_code:'store',amount:150000}],
 const refundBase={order_id:7,reason:'Test refund',key:'50000000-0000-0000-0000-000000000001'};
 const creditBase={user_id:'00000000-0000-0000-0000-000000000002',amount:200000,reason:'Manual test credit',reference:'CREDIT-001',key:'70000000-0000-0000-0000-000000000001'};
 const rescueBase={user_id:creditBase.user_id,amount:100000,reference:'RESCUE-001',key:'80000000-0000-0000-0000-000000000001'};
-function request(action,body,origin='https://mycar.test',type='application/json'){
- return POST(new Request('https://mycar.test/api/write/'+action,{method:'POST',headers:{origin,'content-type':type},body:typeof body==='string'?body:JSON.stringify(body)}),{params:Promise.resolve({action})});
+function request(action,body,origin='https://mycar.test',type='application/json',extraHeaders={}){
+ return POST(new Request('https://mycar.test/api/write/'+action,{method:'POST',headers:{origin,'content-type':type,...extraHeaders},body:typeof body==='string'?body:JSON.stringify(body)}),{params:Promise.resolve({action})});
 }
 (async()=>{
  let passed=0;
  const status=async(p,n)=>{assert.equal((await p).status,n);passed++};
- await status(request('checkout',base,'https://attacker.test'),403);
+  await status(request('checkout',base,'https://attacker.test'),403);
+  await status(request('checkout',base,'https://attacker.test','application/json',{'x-forwarded-host':'attacker.test','x-forwarded-proto':'https'}),403);
  await status(request('checkout',base,'null'),403);
  await status(request('checkout',base,'https://mycar.test','text/plain'),415);
  user=null;await status(request('checkout',base),401);user={id:'test-user'};
@@ -56,9 +63,14 @@ function request(action,body,origin='https://mycar.test',type='application/json'
    assert.equal(lastCall.name,'pay_order_from_wallet');assert.deepEqual(lastCall.args,{p_order_id:7,p_key:walletBase.key});passed++;
   await status(request('wallet_refund',{...refundBase,reason:''}),400);
   await status(request('wallet_refund',{...refundBase,key:'not-a-key'}),400);
-  await status(request('wallet_refund',refundBase),200);
-   assert.equal(lastCall.name,'admin_refund_order_escrow');assert.deepEqual(lastCall.args,{p_order_id:7,p_reason:'Test refund',p_refund_transfer_id:null});passed++;
-  await status(request('manual_credit',{...creditBase,amount:0}),400);
+   await status(request('wallet_refund',refundBase),200);
+    assert.equal(lastCall.name,'admin_refund_order_escrow');assert.deepEqual(lastCall.args,{p_order_id:7,p_reason:'Test refund',p_refund_transfer_id:null});passed++;
+   const callsBeforeLookupFailure=calls;accountLookupError=true;
+   await status(request('manual_credit',creditBase),409);assert.equal(calls,callsBeforeLookupFailure);passed++;
+   accountLookupError=false;accountLookupThrows=true;
+   const lookupFailure=await request('manual_credit',creditBase);assert.equal(lookupFailure.status,503);assert.equal((await lookupFailure.text()).includes('private database error'),false);assert.equal(calls,callsBeforeLookupFailure);passed++;
+   accountLookupThrows=false;
+   await status(request('manual_credit',{...creditBase,amount:0}),400);
   await status(request('manual_credit',creditBase),200);
    assert.equal(lastCall.name,'admin_manual_wallet_entry');assert.deepEqual(lastCall.args,{p_account_id:'account-id',p_direction:'charge',p_amount_toman:creditBase.amount,p_reason:creditBase.reason,p_tracking_reference:creditBase.reference});passed++;
   await status(request('test_rescue',{...rescueBase,amount:0}),400);

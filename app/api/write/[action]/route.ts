@@ -1,23 +1,20 @@
 import { createClient } from "@/lib/supabase-server";
 import { validateWrite } from "@/lib/write-validation";
-import type { WriteAction } from "@/lib/write-action";
+import { registerWriteActions } from "@/lib/write-action";
 import { shopWriteActions } from "@/features/shop/write-actions";
 import { financeWriteActions } from "@/features/finance/write-actions";
 import { rescueWriteActions } from "@/features/rescue/write-actions";
 
 // Every action name is owned by exactly one module. validateWrite rejects unknown names before lookup.
-const writeActions: Record<string, WriteAction> = { ...shopWriteActions, ...financeWriteActions, ...rescueWriteActions };
+const writeActions = registerWriteActions(shopWriteActions, financeWriteActions, rescueWriteActions);
 
 export async function POST(request: Request, { params }: { params: Promise<{ action: string }> }) {
   const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
   const origin = request.headers.get("origin");
-  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const requestUrl = new URL(request.url);
-  const requestHost = forwardedHost || request.headers.get("host") || requestUrl.host;
-  const requestProto = forwardedProto || requestUrl.protocol.slice(0, -1);
-  const expectedOrigin = `${requestProto}://${requestHost}`;
-  if (!origin || origin !== expectedOrigin) return reply({ error: "درخواست نامعتبر است" }, 403);
+  // Do not trust forwarded headers for CSRF validation: clients can forge them unless
+  // every deployment proxy is guaranteed to strip and replace them.
+  if (!origin || origin !== requestUrl.origin) return reply({ error: "درخواست نامعتبر است" }, 403);
   if (!request.headers.get("content-type")?.startsWith("application/json")) return reply({ error: "درخواست نامعتبر است" }, 415);
   const { action } = await params;
   const client = await createClient();
@@ -38,16 +35,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   } catch { return reply({ error: "اطلاعات درخواست معتبر نیست" }, 400); }
   const v = payload;
   const writeAction = writeActions[action];
-  if (writeAction.prepare) {
-    const refusal = await writeAction.prepare(client, v);
-    if (refusal) return reply({ error: refusal }, 409);
+  try {
+    if (writeAction.prepare) {
+      const refusal = await writeAction.prepare(client, v);
+      if (refusal) return reply({ error: refusal }, 409);
+    }
+  } catch {
+    return reply({ error: "سرویس موقتاً در دسترس نیست" }, 503);
   }
   const call = writeAction.call(v);
   let result;
   try {
     result = await client.rpc(call.name, call.args);
   } catch {
-    return reply({ error: "سرویس مالی موقتاً در دسترس نیست" }, 503);
+    return reply({ error: "سرویس موقتاً در دسترس نیست" }, 503);
   }
   if (result.error) {
     const known = ["price_changed", "offer_unavailable", "product_unavailable", "invalid_coupon", "cannot_cancel", "invalid_transition",

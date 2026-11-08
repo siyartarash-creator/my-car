@@ -7,6 +7,7 @@ export async function testWriteIntegration(db,buyer,seller,other) {
    '@/features/shop/write-actions':load('features/shop/write-actions.ts'),
    '@/features/finance/write-actions':load('features/finance/write-actions.ts'),
    '@/features/rescue/write-actions':load('features/rescue/write-actions.ts'),
+   '@/lib/write-action':load('lib/write-action.ts'),
    '@/lib/supabase-server':{createClient:async()=>({
     auth:{getUser:async()=>({data:{user:uid?{id:uid}:null},error:null})},
     from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:null,error:null})})})}),
